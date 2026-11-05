@@ -28,8 +28,7 @@ export function AccountMenu({ phone, name, light }: Props) {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
     } catch { /* ignore */ }
-    router.replace("/login");
-    router.refresh();
+    window.location.assign("/login");
   }
 
   const fg = light ? "#fff" : "#0B2545";

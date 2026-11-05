@@ -66,8 +66,8 @@ function LoginInner() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Алдаа");
       const path = resolvePostLoginPath(data.user?.role, next);
-      router.replace(path);
-      router.refresh();
+      // Hard navigation so the new session cookie is always picked up.
+      window.location.assign(path);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -103,7 +103,7 @@ function LoginInner() {
               type="button"
               className="btn cta"
               style={{ marginTop: 10, height: 56, fontSize: 20 }}
-              onClick={() => router.replace(resolvePostLoginPath(existing.role, next))}
+              onClick={() => { window.location.assign(resolvePostLoginPath(existing.role, next)); }}
             >
               Үргэлжлүүлэх
             </button>
