@@ -52,5 +52,10 @@ export function isLive(status: string | undefined | null): boolean {
   return status === "requested" || status === "accepted" || status === "arrived";
 }
 
+/** Trip finished, fare not settled yet. DB uses `completed` (taxi_complete_ride); UI also accepts `awaiting_payment`. */
+export function isAwaitingPayment(status: string | undefined | null): boolean {
+  return status === "completed" || status === "awaiting_payment";
+}
+
 export const QPAY_KEY = (id: string) => `dt-qpay-${id}`;
 export const RIDE_KEY = "dt-ride";

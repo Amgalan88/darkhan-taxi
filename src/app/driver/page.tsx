@@ -33,6 +33,7 @@ export default function DriverPage() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [balance, setBalance] = useState(0);
+  const [balanceReady, setBalanceReady] = useState(false);
   const [topNote, setTopNote] = useState("");
   const [pending, setPending] = useState<Ride | null>(null);
   const [settlement, setSettlement] = useState<Settlement | null>(null);
@@ -41,6 +42,7 @@ export default function DriverPage() {
   const [approachHint, setApproachHint] = useState<{ lat: number; lng: number } | null>(null);
   const activeId = useRef<string | null>(null);
   const closedByMe = useRef(false);
+  const pendingRef = useRef<Ride | null>(null);
   const approachFor = useRef<string | null>(null);
   const loadSeq = useRef(0);
 
@@ -58,19 +60,32 @@ export default function DriverPage() {
     if (seq !== loadSeq.current || !res.ok) return;
     const ride = data.ride as Ride | undefined;
     if (ride && isLive(ride.status)) {
+      if (pendingRef.current && pendingRef.current.id === ride.id) {
+        setActive(null);
+        return;
+      }
       activeId.current = ride.id;
       closedByMe.current = false;
+      pendingRef.current = null;
+      setPending(null);
       setActive(ride);
       return;
     }
-    if (ride?.status === "completed") {
-      if (activeId.current && !closedByMe.current) setNote("Аялал хаагдлаа");
+    const finished = ride?.status === "completed" || ride?.status === "awaiting_payment";
+    // Finish / payment-pending must never look like a cancel. taxi_my_active_ride
+    // usually returns nothing once the trip is no longer live.
+    if (pendingRef.current || closedByMe.current || finished) {
       closedByMe.current = false;
       activeId.current = null;
       setActive(null);
+      if (finished && !pendingRef.current && ride) {
+        const next = { ...ride, status: "awaiting_payment" };
+        pendingRef.current = next;
+        setPending(next);
+      }
       return;
     }
-    if (activeId.current && !closedByMe.current) setNote("Аялал цуцлагдлаа");
+    if (activeId.current) setNote("Аялал цуцлагдлаа");
     closedByMe.current = false;
     activeId.current = null;
     setActive(null);
@@ -144,7 +159,10 @@ export default function DriverPage() {
   const loadWallet = useCallback(async () => {
     const res = await fetch("/api/driver/wallet");
     const data = await res.json().catch(() => ({}));
-    if (res.ok && typeof data.balance === "number") setBalance(data.balance);
+    if (res.ok && typeof data.balance === "number") {
+      setBalance(data.balance);
+      setBalanceReady(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -162,7 +180,10 @@ export default function DriverPage() {
       const data = await res.json().catch(() => ({}));
       if (!stop && data.settlement) {
         setSettlement(data.settlement);
-        if (typeof data.settlement.balanceAfter === "number") setBalance(data.settlement.balanceAfter);
+        if (typeof data.settlement.balanceAfter === "number") {
+          setBalance(data.settlement.balanceAfter);
+          setBalanceReady(true);
+        }
       }
     };
     void pull();
@@ -172,6 +193,20 @@ export default function DriverPage() {
 
   async function act(id: string, action: string) {
     setBusy(true); setErr("");
+    const snapshot = active;
+    if (action === "finish" && snapshot) {
+      // Mark pending before the request so a realtime poll cannot flash cancelled copy.
+      closedByMe.current = true;
+      loadSeq.current += 1;
+      activeId.current = null;
+      const waiting = { ...snapshot, status: "awaiting_payment" };
+      pendingRef.current = waiting;
+      setPending(waiting);
+      setSettlement(null);
+      setActive(null);
+      setConfirmCancel(false);
+      setNote("");
+    }
     try {
       const res = await fetch(`/api/rides/${id}`, {
         method: "PATCH",
@@ -181,10 +216,9 @@ export default function DriverPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Алдаа");
       if (action === "finish") {
-        loadSeq.current += 1;
-        closedByMe.current = true;
-        activeId.current = null;
-        setPending(data.ride || active);
+        const waiting = { ...(data.ride || pendingRef.current || snapshot!), status: "awaiting_payment" };
+        pendingRef.current = waiting;
+        setPending(waiting);
         setSettlement(null);
         setActive(null);
         setConfirmCancel(false);
@@ -201,6 +235,11 @@ export default function DriverPage() {
       }
       await loadOpen();
     } catch (e) {
+      if (action === "finish") {
+        pendingRef.current = null;
+        closedByMe.current = false;
+        setPending(null);
+      }
       setErr(errText(e));
       await loadActive();
     } finally {
@@ -219,7 +258,10 @@ export default function DriverPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Алдаа");
       setSettlement(data.settlement);
-      if (typeof data.settlement?.balanceAfter === "number") setBalance(data.settlement.balanceAfter);
+      if (typeof data.settlement?.balanceAfter === "number") {
+        setBalance(data.settlement.balanceAfter);
+        setBalanceReady(true);
+      }
     } catch (e) {
       setErr(errText(e));
     } finally {
@@ -234,6 +276,7 @@ export default function DriverPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Алдаа");
       setBalance(data.balance);
+      setBalanceReady(true);
       setTopNote(data.message || "Цэнэглэгдлээ");
     } catch (e) {
       setErr(errText(e));
@@ -281,7 +324,7 @@ export default function DriverPage() {
     ? { id: active.id, to: pickupPt, hint: approachHint }
     : null;
   const carAt = !approach ? (active?.status === "arrived" && pickupPt ? pickupPt : (pos || DARKHAN_CENTER)) : null;
-  const noCredit = balance <= 0;
+  const noCredit = balanceReady && balance <= 0;
   const jobMin = job ? Math.max(1, Math.round(Number(job.distance_km) * 2.5)) : 0;
 
   let heading = "Шинэ дуудлага алга";
@@ -297,7 +340,7 @@ export default function DriverPage() {
     <div style={{ height: "100dvh", position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", top: "max(12px, env(safe-area-inset-top))", left: 12, right: 68, zIndex: 20, display: "flex", gap: 8, alignItems: "center" }}>
         <div className="pill" style={{ flex: 1, height: 56, fontSize: 18, justifyContent: "flex-start" }}>
-          Үлдэгдэл {tugrik(balance)}
+          Үлдэгдэл {balanceReady ? tugrik(balance) : "…"}
         </div>
         <button type="button" className="btn cta" style={{ width: 148, height: noCredit ? 72 : 56, fontSize: 18 }} disabled={busy} onClick={() => { void topup(); }}>
           Цэнэглэх
@@ -372,7 +415,7 @@ export default function DriverPage() {
             ) : (
               <div className="small" style={{ marginTop: 6 }}>QPay-ээс шимтгэл суутгасан</div>
             )}
-            <button type="button" className="btn cta" style={{ marginTop: 14 }} onClick={() => { setSettlement(null); setPending(null); }}>Болсон</button>
+            <button type="button" className="btn cta" style={{ marginTop: 14 }} onClick={() => { pendingRef.current = null; setSettlement(null); setPending(null); }}>Болсон</button>
           </div>
         )}
 
@@ -396,7 +439,7 @@ export default function DriverPage() {
           <div style={{ marginTop: 10 }}>
             <div className="big">{tugrik(fareOf(job))}</div>
             <div className="small" style={{ marginTop: 4 }}>{Number(job.distance_km).toFixed(1)} км · ~{jobMin} мин</div>
-            <button type="button" className="btn green" style={{ marginTop: 14 }} disabled={busy || noCredit || !plateOk(storedPlate)} onClick={() => { void act(job.id, "accept"); }}>
+            <button type="button" className="btn green" style={{ marginTop: 14 }} disabled={busy || !balanceReady || noCredit || !plateOk(storedPlate)} onClick={() => { void act(job.id, "accept"); }}>
               Авах
             </button>
             <button type="button" className="btn sec" disabled={busy} onClick={() => setSkipped((s) => [...s, job.id])}>Татгалзах</button>

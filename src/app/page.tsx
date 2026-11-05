@@ -7,7 +7,7 @@ import { DARKHAN_CENTER, approachFrom, haversineKm, nearDarkhan } from "@/lib/ge
 import { tugrik } from "@/lib/format";
 import { supabasePublic } from "@/lib/supabase";
 import { AccountMenu } from "@/components/AccountMenu";
-import { RIDE_KEY, fareOf, isLive, type DriverInfo, type Ride } from "@/lib/ride";
+import { RIDE_KEY, fareOf, isAwaitingPayment, isLive, type DriverInfo, type Ride } from "@/lib/ride";
 
 const TaxiMap = dynamic(() => import("@/components/Map"), { ssr: false });
 
@@ -94,11 +94,16 @@ export default function PassengerHome() {
         const dueData = await dueRes.json();
         if (stop) return;
         if (dueData?.due) {
-          if (dueData.ride) adopt(dueData.ride, dueData.driver);
-          else {
+          if (dueData.ride) {
+            const r = dueData.ride as Ride;
+            adopt({
+              ...r,
+              status: isAwaitingPayment(r.status) ? r.status : "awaiting_payment",
+            }, dueData.driver);
+          } else {
             setRide({
               id: dueData.due.rideId,
-              status: "completed",
+              status: "awaiting_payment",
               price: dueData.due.gross,
               distance_km: 0,
               pickup_lat: DARKHAN_CENTER.lat,
@@ -199,6 +204,12 @@ export default function PassengerHome() {
         const data = await res.json();
         if (stop || !data.ride) return;
         if (data.ride.status === "cancelled") {
+          // Driver cannot cancel after «Зорчигч авсан»; that transition is a finished trip.
+          if (ride?.status === "arrived") {
+            setRide({ ...data.ride, status: "awaiting_payment" });
+            if (data.driver) setDriver(data.driver);
+            return;
+          }
           setRide(null);
           setDriver(null);
           setDest(null);
@@ -208,6 +219,11 @@ export default function PassengerHome() {
           setConfirmCancel(false);
           setNote("Аялал цуцлагдлаа");
           clearLocal(id);
+          return;
+        }
+        if (data.ride.status === "completed") {
+          setRide({ ...data.ride, status: "awaiting_payment" });
+          if (data.driver) setDriver(data.driver);
           return;
         }
         setRide(data.ride);
@@ -308,7 +324,7 @@ export default function PassengerHome() {
   }
 
   const live = Boolean(ride && isLive(ride.status));
-  const done = ride?.status === "completed";
+  const done = isAwaitingPayment(ride?.status);
   const plate = driver?.plate || "";
   const phone = driver?.phone || "";
   const fare = ride ? fareOf(ride) : quote?.price || 0;
@@ -376,7 +392,7 @@ export default function PassengerHome() {
             )}
             {quote && (
               <div className="small" style={{ marginTop: 6, lineHeight: 1.2 }}>
-                {Number(quote.distance_km).toFixed(1)} км · ~{Math.max(1, Number(quote.eta_min) || 1)} мин
+                {`${Number(quote.distance_km).toFixed(1)} км · ~${Math.max(1, Number(quote.eta_min) || 1)} мин`}
               </div>
             )}
             {quote && offerOpen && (

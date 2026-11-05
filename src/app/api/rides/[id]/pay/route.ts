@@ -44,7 +44,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     });
     const ride = data?.ride;
     if (!ride) return NextResponse.json({ error: "Аялал олдсонгүй" }, { status: 404 });
-    if (ride.status !== "completed") {
+    if (ride.status !== "completed" && ride.status !== "awaiting_payment") {
       return NextResponse.json({ error: "Жолооч аяллыг дуусгасны дараа батална" }, { status: 400 });
     }
     const driverId = ride.driver_id || "";
