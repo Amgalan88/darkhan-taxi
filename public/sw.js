@@ -1,5 +1,5 @@
 
-const CACHE = 'darkhan-taxi-v1';
+const CACHE = 'dmap-v2';
 const ASSETS = ['/', '/manifest.webmanifest', '/icons/icon-192.png'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));

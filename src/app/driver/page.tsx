@@ -1,50 +1,91 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { DARKHAN_CENTER, approachFrom, nearDarkhan } from "@/lib/geo";
 import { tugrik } from "@/lib/format";
 import { supabasePublic } from "@/lib/supabase";
 import { AccountMenu } from "@/components/AccountMenu";
+import { plateError, plateOk } from "@/lib/plate";
+import { fareOf, isLive, type Me, type Ride } from "@/lib/ride";
+import type { Settlement } from "@/lib/ledger";
 
 const TaxiMap = dynamic(() => import("@/components/Map"), { ssr: false });
 
-type Ride = {
-  id: string; status: string; price: number; distance_km: number;
-  pickup_lat: number; pickup_lng: number; pickup_label: string;
-  dest_lat: number; dest_lng: number; dest_label: string;
-  offered_price?: number | null;
-};
+function errText(e: unknown): string {
+  const m = (e as Error).message || "Алдаа";
+  if (m === "Failed to fetch") return "Холболт тасарлаа. Дахин оролдоно уу.";
+  return m;
+}
 
 export default function DriverPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
-  const [user, setUser] = useState<{ phone: string; name: string } | null>(null);
+  const [user, setUser] = useState<Me | null>(null);
   const [open, setOpen] = useState<Ride[]>([]);
   const [active, setActive] = useState<Ride | null>(null);
   const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [plate, setPlate] = useState("");
+  const [carModel, setCarModel] = useState("");
+  const [carColor, setCarColor] = useState("");
   const [err, setErr] = useState("");
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [balance, setBalance] = useState(0);
+  const [topNote, setTopNote] = useState("");
+  const [pending, setPending] = useState<Ride | null>(null);
+  const [settlement, setSettlement] = useState<Settlement | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const [approachHint, setApproachHint] = useState<{ lat: number; lng: number } | null>(null);
+  const activeId = useRef<string | null>(null);
+  const closedByMe = useRef(false);
+  const approachFor = useRef<string | null>(null);
+  const loadSeq = useRef(0);
 
-  async function loadOpen() {
+  const loadOpen = useCallback(async () => {
     const res = await fetch("/api/rides/open");
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (res.ok) setOpen(data.rides || []);
-    else setErr(data.error || "Алдаа");
-  }
+    else if (data.error) setErr(data.error);
+  }, []);
 
-  async function loadActive() {
+  const loadActive = useCallback(async () => {
+    const seq = ++loadSeq.current;
     const res = await fetch("/api/rides");
-    const data = await res.json();
-    if (data.ride) setActive(data.ride);
-    else setActive(null);
-  }
+    const data = await res.json().catch(() => ({}));
+    if (seq !== loadSeq.current || !res.ok) return;
+    const ride = data.ride as Ride | undefined;
+    if (ride && isLive(ride.status)) {
+      activeId.current = ride.id;
+      closedByMe.current = false;
+      setActive(ride);
+      return;
+    }
+    if (ride?.status === "completed") {
+      if (activeId.current && !closedByMe.current) setNote("Аялал хаагдлаа");
+      closedByMe.current = false;
+      activeId.current = null;
+      setActive(null);
+      return;
+    }
+    if (activeId.current && !closedByMe.current) setNote("Аялал цуцлагдлаа");
+    closedByMe.current = false;
+    activeId.current = null;
+    setActive(null);
+  }, []);
+
+  useEffect(() => {
+    if (!note) return;
+    const t = window.setTimeout(() => setNote(""), 4000);
+    return () => window.clearTimeout(t);
+  }, [note]);
 
   useEffect(() => {
     fetch("/api/auth/me").then((r) => r.json()).then(async (d) => {
       if (!d.user) { router.replace("/login?next=/driver"); return; }
       if (d.user.role !== "driver" && d.user.role !== "admin") {
-        // Let them switch accounts instead of trapping on passenger home.
         router.replace("/login?next=/driver");
         return;
       }
@@ -52,42 +93,82 @@ export default function DriverPage() {
       setReady(true);
       await loadOpen();
       await loadActive();
-    });
-  }, [router]);
+    }).catch(() => setReady(true));
+  }, [router, loadOpen, loadActive]);
 
   useEffect(() => {
     if (!ready) return;
-    const pushLoc = (lat: number, lng: number) => {
-      setPos({ lat, lng });
-      fetch("/api/driver/location", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lat, lng }),
-      }).catch(() => {});
-    };
     let watch = -1;
     if (navigator.geolocation) {
       watch = navigator.geolocation.watchPosition(
-        (p) => pushLoc(p.coords.latitude, p.coords.longitude),
+        (p) => {
+          const next = { lat: p.coords.latitude, lng: p.coords.longitude };
+          if (!nearDarkhan(next)) return;
+          setPos(next);
+          fetch("/api/driver/location", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(next),
+          }).catch(() => {});
+        },
         () => {},
         { enableHighAccuracy: true, maximumAge: 5000 },
       );
     }
     const sb = supabasePublic();
-    const ch = sb
-      .channel("driver-open")
+    const ch = sb.channel("driver-open")
       .on("postgres_changes", { event: "*", schema: "taxi", table: "rides" }, () => {
-        loadOpen();
-        loadActive();
+        void loadOpen();
+        void loadActive();
       })
       .subscribe();
-    const poll = setInterval(() => { loadOpen(); loadActive(); }, 4000);
+    const poll = window.setInterval(() => { void loadOpen(); void loadActive(); }, 4000);
     return () => {
       if (watch >= 0) navigator.geolocation.clearWatch(watch);
       sb.removeChannel(ch);
-      clearInterval(poll);
+      window.clearInterval(poll);
     };
-  }, [ready]);
+  }, [ready, loadOpen, loadActive]);
+
+  useEffect(() => {
+    if (active?.status !== "accepted") {
+      approachFor.current = null;
+      setApproachHint(null);
+      return;
+    }
+    if (approachFor.current === active.id) return;
+    approachFor.current = active.id;
+    setApproachHint(approachFrom(pos, { lat: Number(active.pickup_lat), lng: Number(active.pickup_lng) }));
+  }, [active?.status, active?.id, active?.pickup_lat, active?.pickup_lng, pos]);
+
+  const loadWallet = useCallback(async () => {
+    const res = await fetch("/api/driver/wallet");
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && typeof data.balance === "number") setBalance(data.balance);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    void loadWallet();
+    const t = window.setInterval(() => { void loadWallet(); }, 4000);
+    return () => window.clearInterval(t);
+  }, [ready, loadWallet]);
+
+  useEffect(() => {
+    if (!pending?.id || settlement) return;
+    let stop = false;
+    const pull = async () => {
+      const res = await fetch(`/api/rides/${pending.id}/pay`);
+      const data = await res.json().catch(() => ({}));
+      if (!stop && data.settlement) {
+        setSettlement(data.settlement);
+        if (typeof data.settlement.balanceAfter === "number") setBalance(data.settlement.balanceAfter);
+      }
+    };
+    void pull();
+    const t = window.setInterval(() => { void pull(); }, 2000);
+    return () => { stop = true; window.clearInterval(t); };
+  }, [pending?.id, settlement]);
 
   async function act(id: string, action: string) {
     setBusy(true); setErr("");
@@ -97,66 +178,202 @@ export default function DriverPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Алдаа");
-      if (action === "complete") setActive(null);
-      else setActive(data.ride);
+      if (action === "finish") {
+        loadSeq.current += 1;
+        closedByMe.current = true;
+        activeId.current = null;
+        setPending(data.ride || active);
+        setSettlement(null);
+        setActive(null);
+        setConfirmCancel(false);
+      } else if (action === "cancel") {
+        loadSeq.current += 1;
+        closedByMe.current = true;
+        activeId.current = null;
+        setActive(null);
+        setConfirmCancel(false);
+        setNote("Цуцлагдлаа");
+      } else if (data.ride) {
+        activeId.current = data.ride.id;
+        setActive(data.ride);
+      }
       await loadOpen();
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(errText(e));
+      await loadActive();
     } finally {
       setBusy(false);
     }
   }
 
-  if (!ready) return <div style={{ padding: 24 }}>Ачаалж байна…</div>;
+  async function topup() {
+    setBusy(true); setErr("");
+    try {
+      const res = await fetch("/api/driver/wallet", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Алдаа");
+      setBalance(data.balance);
+      setTopNote(data.message || "Цэнэглэгдлээ");
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function savePlate(e: FormEvent) {
+    e.preventDefault();
+    const problem = plateError(plate);
+    if (problem) { setErr(problem); return; }
+    setBusy(true); setErr("");
+    try {
+      const res = await fetch("/api/driver/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plate,
+          car_model: carModel || user?.driver?.car_model || "Машин",
+          car_color: carColor || user?.driver?.car_color || "Цагаан",
+          name: user?.name || "Жолооч",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Алдаа");
+      setUser(data.user);
+      setPlate("");
+      setNote("Дугаар хадгаллаа");
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const storedPlate = user?.driver?.plate || "";
+  const needsPlate = user?.role === "driver" && !plateOk(storedPlate);
+  const waiting = user?.role === "driver" && plateOk(storedPlate) && user.driver?.approved === false;
+  const job = open.find((r) => !skipped.includes(r.id)) || null;
+  const focus = active || (!pending ? job : null);
+  const pickupPt = focus ? { lat: Number(focus.pickup_lat), lng: Number(focus.pickup_lng) } : null;
+  const destPt = focus ? { lat: Number(focus.dest_lat), lng: Number(focus.dest_lng) } : null;
+  const approach = active?.status === "accepted" && pickupPt && approachHint
+    ? { id: active.id, to: pickupPt, hint: approachHint }
+    : null;
+  const carAt = !approach ? (active?.status === "arrived" && pickupPt ? pickupPt : (pos || DARKHAN_CENTER)) : null;
+  const noCredit = balance <= 0;
+  const jobMin = job ? Math.max(1, Math.round(Number(job.distance_km) * 2.5)) : 0;
+
+  let heading = "Шинэ дуудлага алга";
+  if (needsPlate && !active && !pending) heading = "Машины дугаар";
+  else if (waiting && !active) heading = "Зөвшөөрөл хүлээгдэж байна";
+  else if (settlement) heading = "Таны орлого";
+  else if (pending) heading = "Төлбөр хүлээж байна";
+  else if (active?.status === "accepted") heading = "Зорчигч руу";
+  else if (active?.status === "arrived") heading = "Аялалд";
+  else if (job) heading = "Шинэ дуудлага";
 
   return (
-    <div style={{ minHeight: "100dvh", position: "relative" }}>
-      <div style={{ position: "absolute", top: 12, right: 12, zIndex: 20 }}>
-        <AccountMenu phone={user?.phone} name={user?.name} />
+    <div style={{ height: "100dvh", position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", top: "max(12px, env(safe-area-inset-top))", left: 12, right: 68, zIndex: 20, display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="pill" style={{ flex: 1, height: 56, fontSize: 18, justifyContent: "flex-start" }}>
+          Үлдэгдэл {tugrik(balance)}
+        </div>
+        <button type="button" className="btn cta" style={{ width: 148, height: noCredit ? 72 : 56, fontSize: 18 }} disabled={busy} onClick={() => { void topup(); }}>
+          Цэнэглэх
+        </button>
       </div>
-      <TaxiMap
-        pickup={active ? { lat: active.pickup_lat, lng: active.pickup_lng } : pos}
-        dest={active ? { lat: active.dest_lat, lng: active.dest_lng } : null}
-        driver={pos}
-      />
-      <div className="sheet" style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 10, maxHeight: "55vh", overflow: "auto" }}>
-        <div style={{ fontSize: 28, fontWeight: 800 }}>Жолоочийн самбар</div>
-        {err && <div style={{ color: "#B42318", marginTop: 8 }}>{err}</div>}
+      {user && (
+        <div style={{ position: "absolute", top: "max(12px, env(safe-area-inset-top))", right: 12, zIndex: 20 }}>
+          <AccountMenu phone={user.phone} name={user.name} />
+        </div>
+      )}
+      <TaxiMap pickup={pickupPt} dest={destPt} driver={carAt} approach={approach} />
+      <div className="sheet" style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 10, maxHeight: "52vh", overflow: "auto" }}>
+        <div className="handle" />
+        {!ready && <div style={{ fontWeight: 800, fontSize: 28 }}>Ачаалж байна…</div>}
+        {ready && <div style={{ fontSize: 28, fontWeight: 800 }} aria-live="polite">{heading}</div>}
+        {storedPlate && plateOk(storedPlate) && !needsPlate && (
+          <div className="small" style={{ marginTop: 4 }}>{user?.driver?.car_color} · {user?.driver?.car_model} · {storedPlate}</div>
+        )}
+        {noCredit && !active && !pending && (
+          <div style={{ marginTop: 8, fontWeight: 800, color: "#B42318" }}>Кредит цэнэглэнэ үү</div>
+        )}
+        {(note || topNote) && <div style={{ marginTop: 8, fontWeight: 700 }}>{note || topNote}</div>}
+        {err && <div style={{ color: "#B42318", marginTop: 8, fontWeight: 700 }}>{err}</div>}
 
-        {active ? (
-          <div style={{ marginTop: 16 }}>
-            <div className="card">
-              <div className="small">Одоогийн аялал · {active.status}</div>
-              <div style={{ fontWeight: 800, marginTop: 6 }}>{active.pickup_label} → {active.dest_label}</div>
-              <div className="big" style={{ marginTop: 8 }}>{tugrik(active.offered_price || active.price)}</div>
-            </div>
-            {active.status === "accepted" && (
-              <button className="btn cta" style={{ marginTop: 14 }} disabled={busy} onClick={() => act(active.id, "arrived")}>
-                Ирлээ
-              </button>
+        {ready && needsPlate && !active && !pending && (
+          <form onSubmit={savePlate} style={{ marginTop: 12 }}>
+            <label className="label" htmlFor="model">Машины загвар</label>
+            <input id="model" value={carModel} onChange={(e) => setCarModel(e.target.value)} placeholder="Prius" style={{ width: "100%", height: 64, fontSize: 20, fontWeight: 700, borderRadius: 16, border: "2px solid #D5DBE3", padding: "0 16px" }} />
+            <label className="label" htmlFor="color" style={{ display: "block", marginTop: 12 }}>Өнгө</label>
+            <input id="color" value={carColor} onChange={(e) => setCarColor(e.target.value)} placeholder="Цагаан" style={{ width: "100%", height: 64, fontSize: 20, fontWeight: 700, borderRadius: 16, border: "2px solid #D5DBE3", padding: "0 16px" }} />
+            <label className="label" htmlFor="plate" style={{ display: "block", marginTop: 12 }}>Улсын дугаар</label>
+            <input id="plate" value={plate} autoComplete="off" placeholder="1234 УБА" onChange={(e) => setPlate(e.target.value)} style={{ width: "100%", height: 64, fontSize: 24, fontWeight: 800, borderRadius: 16, border: "2px solid #0B2545", padding: "0 16px" }} />
+            <button className="btn cta" style={{ marginTop: 14 }} type="submit" disabled={busy || !plate.trim()}>Хадгалах</button>
+          </form>
+        )}
+
+        {ready && waiting && !active && <div className="small" style={{ marginTop: 10 }}>Админ зөвшөөрсний дараа дуудлага авна.</div>}
+
+        {confirmCancel && active && (
+          <>
+            <div style={{ marginTop: 12, fontWeight: 800, fontSize: 22 }}>Цуцлах уу?</div>
+            <button type="button" className="btn cta" style={{ marginTop: 12, background: "#B42318", color: "#fff" }} disabled={busy} onClick={() => { void act(active.id, "cancel"); }}>Тийм, цуцлах</button>
+            <button type="button" className="btn sec" onClick={() => setConfirmCancel(false)}>Буцах</button>
+          </>
+        )}
+
+        {!confirmCancel && ready && !needsPlate && !waiting && active?.status === "accepted" && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontWeight: 800, fontSize: 22 }}>{active.passenger_name || "Зорчигч"}</div>
+            {active.passenger_phone && (
+              <a className="btn green" style={{ marginTop: 12, height: 60, fontSize: 22, textDecoration: "none" }} href={`tel:+976${active.passenger_phone}`}>Залгах</a>
             )}
-            {(active.status === "accepted" || active.status === "arrived") && (
-              <button className="btn green" style={{ marginTop: 12 }} disabled={busy} onClick={() => act(active.id, "complete")}>
-                Дууслаа
-              </button>
+            <button type="button" className="btn cta" style={{ marginTop: 12 }} disabled={busy} onClick={() => { void act(active.id, "arrived"); }}>Зорчигч авсан</button>
+            <button type="button" className="btn sec" disabled={busy} onClick={() => setConfirmCancel(true)}>Цуцлах</button>
+          </div>
+        )}
+
+        {!confirmCancel && ready && active?.status === "arrived" && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontWeight: 800 }}>{active.dest_label || "Очих газар"}</div>
+            <div className="big" style={{ marginTop: 8 }}>{tugrik(fareOf(active))}</div>
+            <button type="button" className="btn cta" style={{ marginTop: 14 }} disabled={busy} onClick={() => { void act(active.id, "finish"); }}>Дуусгах</button>
+          </div>
+        )}
+
+        {settlement && (
+          <div style={{ marginTop: 8 }}>
+            <div className="big">{tugrik(settlement.net)}</div>
+            <div className="small" style={{ marginTop: 6 }}>Шимтгэл {settlement.commissionPct}% · {tugrik(settlement.commission)}</div>
+            {settlement.method === "driver_cash" ? (
+              <div className="small" style={{ marginTop: 6 }}>Кредитээс −{tugrik(settlement.commission)} · үлдэгдэл {tugrik(settlement.balanceAfter)}</div>
+            ) : (
+              <div className="small" style={{ marginTop: 6 }}>QPay-ээс шимтгэл суутгасан</div>
             )}
+            <button type="button" className="btn cta" style={{ marginTop: 14 }} onClick={() => { setSettlement(null); setPending(null); }}>Болсон</button>
           </div>
-        ) : (
-          <div style={{ marginTop: 16 }}>
-            <div className="small" style={{ marginBottom: 8 }}>Шинэ дуудлага</div>
-            {open.length === 0 && <div style={{ fontWeight: 700 }}>Одоогоор хүсэлт алга</div>}
-            {open.map((r) => (
-              <div key={r.id} className="card" style={{ marginBottom: 12, background: "#fff", border: "2px solid #D5DBE3" }}>
-                <div style={{ fontWeight: 800 }}>{r.dest_label || "Очих газар"}</div>
-                <div className="small">{Number(r.distance_km).toFixed(1)} км · {tugrik(r.offered_price || r.price)}</div>
-                <button className="btn cta" style={{ marginTop: 12, height: 60, fontSize: 22 }} disabled={busy} onClick={() => act(r.id, "accept")}>
-                  Зөвшөөрөх
-                </button>
-              </div>
-            ))}
+        )}
+
+        {!settlement && pending && (
+          <div className="small" style={{ marginTop: 10 }}>Зорчигч QPay эсвэл «Жолооч бэлнээр авсан» гэж батална.</div>
+        )}
+
+        {ready && !needsPlate && !waiting && !active && !pending && job && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontWeight: 800, fontSize: 20 }}>{Number(job.distance_km).toFixed(1)} км · {jobMin} мин</div>
+            <div className="big" style={{ marginTop: 8 }}>{tugrik(fareOf(job))}</div>
+            <button type="button" className="btn green" style={{ marginTop: 14 }} disabled={busy || noCredit || !plateOk(storedPlate)} onClick={() => { void act(job.id, "accept"); }}>
+              Авах
+            </button>
+            <button type="button" className="btn sec" disabled={busy} onClick={() => setSkipped((s) => [...s, job.id])}>Татгалзах</button>
           </div>
+        )}
+
+        {ready && !active && !pending && !job && !needsPlate && (
+          <div className="small" style={{ marginTop: 10 }}>Газрын зураг дээр хүлээнэ.</div>
         )}
       </div>
     </div>

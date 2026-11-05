@@ -5,10 +5,10 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin", "cyrillic"], weight: ["600", "700", "800"] });
 
 export const metadata: Metadata = {
-  title: "Дархан Такси",
-  description: "Дарханы такси дуудлага",
+  title: "DMAP",
+  description: "Дархан хотын такси",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, title: "Дархан Такси", statusBarStyle: "default" },
+  appleWebApp: { capable: true, title: "DMAP", statusBarStyle: "default" },
   icons: { icon: "/icons/icon-192.png", apple: "/icons/icon-192.png" },
 };
 
