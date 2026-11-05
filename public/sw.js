@@ -1,5 +1,5 @@
 
-const CACHE = "dmap-v5";
+const CACHE = "dmap-v6";
 const ASSETS = ["/manifest.webmanifest", "/icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {

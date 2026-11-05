@@ -349,6 +349,8 @@ export default function PassengerHome() {
   const showDriver = ride && (ride.status === "accepted" || ride.status === "arrived");
   const canCancel = ride?.status === "requested" || ride?.status === "accepted";
   const chosenFare = offer ?? quote?.price ?? 0;
+  const tripKm = dest ? (Number(quote?.distance_km) || haversineKm(pickup, dest)) : 0;
+  const tripMin = dest ? Math.max(1, Number(quote?.eta_min) || Math.round(tripKm * 2.5) || 1) : 0;
 
   return (
     <div style={{ height: "100dvh", position: "relative", overflow: "hidden" }}>
@@ -390,9 +392,9 @@ export default function PassengerHome() {
             {quote && (
               <div className="big" style={{ marginTop: 8, lineHeight: 1 }}>{tugrik(chosenFare)}</div>
             )}
-            {quote && (
-              <div className="small" style={{ marginTop: 6, lineHeight: 1.2 }}>
-                {`${Number(quote.distance_km).toFixed(1)} км · ~${Math.max(1, Number(quote.eta_min) || 1)} мин`}
+            {dest && tripKm > 0 && (
+              <div className="small" style={{ marginTop: quote ? 6 : 8, lineHeight: 1.2 }}>
+                {`${tripKm.toFixed(1)} км · ~${tripMin} мин`}
               </div>
             )}
             {quote && offerOpen && (

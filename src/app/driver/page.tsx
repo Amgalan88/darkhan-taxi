@@ -19,6 +19,32 @@ function errText(e: unknown): string {
   return m;
 }
 
+const OWED_KEY = "dt-owed";
+const RELEASE_MS = 3000;
+
+function readOwed(): Ride[] {
+  if (typeof sessionStorage === "undefined") return [];
+  try {
+    const raw = sessionStorage.getItem(OWED_KEY);
+    const list = raw ? JSON.parse(raw) as Ride[] : [];
+    return Array.isArray(list) ? list.filter((r) => r && typeof r.id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeOwed(list: Ride[]) {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    if (list.length) sessionStorage.setItem(OWED_KEY, JSON.stringify(list));
+    else sessionStorage.removeItem(OWED_KEY);
+  } catch { /* ignore */ }
+}
+
+function wasReleased(id: string, released: Set<string>): boolean {
+  return released.has(id) || readOwed().some((r) => r.id === id);
+}
+
 export default function DriverPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
@@ -36,6 +62,7 @@ export default function DriverPage() {
   const [balanceReady, setBalanceReady] = useState(false);
   const [topNote, setTopNote] = useState("");
   const [pending, setPending] = useState<Ride | null>(null);
+  const [owed, setOwed] = useState<Ride[]>([]);
   const [settlement, setSettlement] = useState<Settlement | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [skipped, setSkipped] = useState<string[]>([]);
@@ -43,8 +70,26 @@ export default function DriverPage() {
   const activeId = useRef<string | null>(null);
   const closedByMe = useRef(false);
   const pendingRef = useRef<Ride | null>(null);
+  const releasedIds = useRef<Set<string>>(new Set());
   const approachFor = useRef<string | null>(null);
   const loadSeq = useRef(0);
+
+  const rememberOwed = useCallback((ride: Ride) => {
+    releasedIds.current.add(ride.id);
+    setOwed((list) => {
+      const next = list.some((r) => r.id === ride.id) ? list : [...list, ride];
+      writeOwed(next);
+      return next;
+    });
+  }, []);
+
+  const forgetOwed = useCallback((id: string) => {
+    setOwed((list) => {
+      const next = list.filter((r) => r.id !== id);
+      writeOwed(next);
+      return next;
+    });
+  }, []);
 
   const loadOpen = useCallback(async () => {
     const res = await fetch("/api/rides/open");
@@ -80,8 +125,12 @@ export default function DriverPage() {
       setActive(null);
       if (finished && !pendingRef.current && ride) {
         const next = { ...ride, status: "awaiting_payment" };
-        pendingRef.current = next;
-        setPending(next);
+        if (wasReleased(ride.id, releasedIds.current)) {
+          rememberOwed(next);
+        } else {
+          pendingRef.current = next;
+          setPending(next);
+        }
       }
       return;
     }
@@ -89,7 +138,7 @@ export default function DriverPage() {
     closedByMe.current = false;
     activeId.current = null;
     setActive(null);
-  }, []);
+  }, [rememberOwed]);
 
   useEffect(() => {
     if (!note) return;
@@ -102,6 +151,28 @@ export default function DriverPage() {
     const t = window.setTimeout(() => setTopNote(""), 4000);
     return () => window.clearTimeout(t);
   }, [topNote]);
+
+  useEffect(() => {
+    const saved = readOwed();
+    if (!saved.length) return;
+    for (const r of saved) releasedIds.current.add(r.id);
+    setOwed(saved);
+  }, []);
+
+  // After «Дуусгах», show «Төлбөр хүлээж байна» briefly, then release to idle
+  // so the driver is never stuck while the passenger still owes.
+  useEffect(() => {
+    if (!pending?.id || settlement) return;
+    const id = pending.id;
+    const t = window.setTimeout(() => {
+      const snapshot = pendingRef.current;
+      if (snapshot?.id !== id) return;
+      pendingRef.current = null;
+      rememberOwed(snapshot);
+      setPending(null);
+    }, RELEASE_MS);
+    return () => window.clearTimeout(t);
+  }, [pending?.id, settlement, rememberOwed]);
 
   useEffect(() => {
     fetch("/api/auth/me").then((r) => r.json()).then(async (d) => {
@@ -186,6 +257,7 @@ export default function DriverPage() {
       const data = await res.json().catch(() => ({}));
       if (!stop && data.settlement) {
         setSettlement(data.settlement);
+        if (data.settlement.rideId) forgetOwed(data.settlement.rideId);
         if (typeof data.settlement.balanceAfter === "number") {
           setBalance(data.settlement.balanceAfter);
           setBalanceReady(true);
@@ -195,7 +267,21 @@ export default function DriverPage() {
     void pull();
     const t = window.setInterval(() => { void pull(); }, 2000);
     return () => { stop = true; window.clearInterval(t); };
-  }, [pending?.id, settlement]);
+  }, [pending?.id, settlement, forgetOwed]);
+
+  useEffect(() => {
+    if (pending || settlement || !owed.length) return;
+    const id = owed[owed.length - 1].id;
+    let stop = false;
+    const pull = async () => {
+      const res = await fetch(`/api/rides/${id}/pay`);
+      const data = await res.json().catch(() => ({}));
+      if (!stop && data.settlement?.rideId) forgetOwed(data.settlement.rideId);
+    };
+    void pull();
+    const t = window.setInterval(() => { void pull(); }, 4000);
+    return () => { stop = true; window.clearInterval(t); };
+  }, [owed, pending, settlement, forgetOwed]);
 
   async function act(id: string, action: string) {
     setBusy(true); setErr("");
@@ -223,8 +309,14 @@ export default function DriverPage() {
       if (!res.ok) throw new Error(data.error || "Алдаа");
       if (action === "finish") {
         const waiting = { ...(data.ride || pendingRef.current || snapshot!), status: "awaiting_payment" };
-        pendingRef.current = waiting;
-        setPending(waiting);
+        if (wasReleased(waiting.id, releasedIds.current) || pendingRef.current == null) {
+          rememberOwed(waiting);
+          pendingRef.current = null;
+          setPending(null);
+        } else {
+          pendingRef.current = waiting;
+          setPending(waiting);
+        }
         setSettlement(null);
         setActive(null);
         setConfirmCancel(false);
@@ -242,9 +334,14 @@ export default function DriverPage() {
       await loadOpen();
     } catch (e) {
       if (action === "finish") {
+        const rid = snapshot?.id;
         pendingRef.current = null;
         closedByMe.current = false;
         setPending(null);
+        if (rid) {
+          releasedIds.current.delete(rid);
+          forgetOwed(rid);
+        }
       }
       setErr(errText(e));
       await loadActive();
@@ -264,6 +361,8 @@ export default function DriverPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Алдаа");
       setSettlement(data.settlement);
+      if (data.settlement?.rideId) forgetOwed(data.settlement.rideId);
+      else forgetOwed(id);
       if (typeof data.settlement?.balanceAfter === "number") {
         setBalance(data.settlement.balanceAfter);
         setBalanceReady(true);
@@ -333,6 +432,7 @@ export default function DriverPage() {
   const noCredit = balanceReady && balance <= 0;
   const jobMin = job ? Math.max(1, Math.round(Number(job.distance_km) * 2.5)) : 0;
   const idle = Boolean(ready && !needsPlate && !waiting && !active && !pending && !job && !settlement && !confirmCancel);
+  const laterRide = owed.length ? owed[owed.length - 1] : null;
 
   let heading = "Шинэ дуудлага алга";
   if (needsPlate && !active && !pending) heading = "Машины дугаар";
@@ -416,6 +516,22 @@ export default function DriverPage() {
           Газрын зураг дээр хүлээнэ
         </div>
       )}
+      {idle && laterRide && (
+        <button
+          type="button"
+          className="pill"
+          disabled={busy}
+          onClick={() => { void markCash(laterRide.id); }}
+          style={{
+            position: "absolute", left: "50%", bottom: "calc(max(120px, min(16vh, 140px)) + 60px)", transform: "translateX(-50%)",
+            zIndex: 15, height: 44, maxWidth: "calc(100% - 24px)", fontSize: 15, fontWeight: 800,
+            border: "none", cursor: busy ? "not-allowed" : "pointer",
+            background: "rgba(255,255,255,0.88)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+          }}
+        >
+          Бэлнээр авсан · {tugrik(fareOf(laterRide))}
+        </button>
+      )}
       <div
         className="sheet"
         style={{
@@ -492,7 +608,16 @@ export default function DriverPage() {
             ) : (
               <div className="small" style={{ marginTop: 6 }}>QPay-ээс шимтгэл суутгасан</div>
             )}
-            <button type="button" className="btn cta" style={{ marginTop: 14 }} onClick={() => { pendingRef.current = null; setSettlement(null); setPending(null); }}>Болсон</button>
+            <button type="button" className="btn cta" style={{ marginTop: 14 }} onClick={() => {
+              const sid = settlement.rideId;
+              pendingRef.current = null;
+              if (sid) {
+                releasedIds.current.add(sid);
+                forgetOwed(sid);
+              }
+              setSettlement(null);
+              setPending(null);
+            }}>Болсон</button>
           </div>
         )}
 
