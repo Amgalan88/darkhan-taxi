@@ -98,6 +98,12 @@ export default function DriverPage() {
   }, [note]);
 
   useEffect(() => {
+    if (!topNote) return;
+    const t = window.setTimeout(() => setTopNote(""), 4000);
+    return () => window.clearTimeout(t);
+  }, [topNote]);
+
+  useEffect(() => {
     fetch("/api/auth/me").then((r) => r.json()).then(async (d) => {
       if (!d.user) { router.replace("/login?next=/driver"); return; }
       if (d.user.role !== "driver" && d.user.role !== "admin") {
@@ -277,7 +283,7 @@ export default function DriverPage() {
       if (!res.ok) throw new Error(data.error || "Алдаа");
       setBalance(data.balance);
       setBalanceReady(true);
-      setTopNote(data.message || "Цэнэглэгдлээ");
+      setTopNote("И-баримт илгээгдлээ");
     } catch (e) {
       setErr(errText(e));
     } finally {
@@ -347,24 +353,54 @@ export default function DriverPage() {
             background: "rgba(255,255,255,0.88)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
           }}
         >
-          Үлдэгдэл {balanceReady ? tugrik(balance) : "…"}
+          <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.15 }}>
+            <span style={{ fontSize: 11, fontWeight: 700 }}>Шимтгэлийн урьдчилгаа</span>
+            <span>{balanceReady ? tugrik(balance) : "…"}</span>
+          </span>
         </div>
         <button
           type="button"
           disabled={busy}
           onClick={() => { void topup(); }}
           style={{
-            height: 48, width: "auto", padding: "0 16px", flex: "none",
+            height: 48, width: "auto", padding: "0 12px", flex: "none",
             border: "none", borderRadius: 16, background: "#FFC300", color: "#0B2545",
-            fontWeight: 800, fontSize: 16, cursor: busy ? "not-allowed" : "pointer",
+            fontWeight: 800, fontSize: 14, cursor: busy ? "not-allowed" : "pointer",
           }}
         >
-          Цэнэглэх
+          Урьдчилгаа нэмэх
         </button>
       </div>
       {user && (
         <div style={{ position: "absolute", top: "max(12px, env(safe-area-inset-top))", right: 12, zIndex: 20 }}>
           <AccountMenu phone={user.phone} name={user.name} glass />
+        </div>
+      )}
+      <div
+        style={{
+          position: "absolute",
+          top: "calc(max(12px, env(safe-area-inset-top)) + 56px)",
+          left: 12, right: 12, zIndex: 18,
+          padding: "6px 10px", borderRadius: 12, textAlign: "center",
+          background: "rgba(255,255,255,0.88)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+          color: "#4A5568", fontSize: 12, fontWeight: 700, lineHeight: 1.3,
+        }}
+      >
+        Зөвхөн DMAP шимтгэлд зарцуулагдана · буцаан бэлнээр гаргахгүй
+      </div>
+      {topNote && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(max(12px, env(safe-area-inset-top)) + 96px)",
+            left: "50%", transform: "translateX(-50%)", zIndex: 19,
+            padding: "8px 14px", borderRadius: 999,
+            background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+            color: "#16733A", fontSize: 15, fontWeight: 800, whiteSpace: "nowrap",
+            boxShadow: "0 4px 16px rgba(11,37,69,.15)",
+          }}
+        >
+          {topNote}
         </div>
       )}
       <TaxiMap pickup={pickupPt} dest={destPt} driver={carAt} approach={approach} />
@@ -401,9 +437,9 @@ export default function DriverPage() {
           <div className="small" style={{ marginTop: 4 }}>{user?.driver?.car_color} · {user?.driver?.car_model} · {storedPlate}</div>
         )}
         {noCredit && !active && !pending && !idle && (
-          <div style={{ marginTop: 8, fontWeight: 800, color: "#B42318" }}>Кредит цэнэглэнэ үү</div>
+          <div style={{ marginTop: 8, fontWeight: 800, color: "#B42318" }}>Урьдчилгаа нэмнэ үү</div>
         )}
-        {(note || topNote) && <div style={{ marginTop: 8, fontWeight: 700 }}>{note || topNote}</div>}
+        {note && !idle && <div style={{ marginTop: 8, fontWeight: 700 }}>{note}</div>}
         {err && <div style={{ color: "#B42318", marginTop: 8, fontWeight: 700 }}>{err}</div>}
 
         {ready && needsPlate && !active && !pending && (
