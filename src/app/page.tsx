@@ -79,39 +79,60 @@ export default function PassengerHome() {
 
   useEffect(() => {
     let stop = false;
-    fetch("/api/auth/me").then((r) => r.json()).then(async (d) => {
-      if (stop) return;
-      if (!d.user) { router.replace("/login"); return; }
-      if (d.user.role === "driver") { router.replace("/driver"); return; }
-      if (d.user.role === "admin") { router.replace("/admin"); return; }
-      setUser(d.user);
+    // Never block the call sheet on rides/geo — show destination promptly.
+    const failSafe = window.setTimeout(() => {
+      if (!stop) setReady(true);
+    }, 1200);
+
+    async function restoreRide() {
       try {
-        const res = await fetch("/api/rides");
+        const ctrl = new AbortController();
+        const kill = window.setTimeout(() => ctrl.abort(), 4000);
+        const res = await fetch("/api/rides", { signal: ctrl.signal });
+        window.clearTimeout(kill);
         const data = await res.json();
+        if (stop) return;
         if (data.ride && isLive(data.ride.status)) {
           adopt(data.ride, data.driver);
+          return;
+        }
+        const saved = sessionStorage.getItem(RIDE_KEY);
+        if (!saved) return;
+        const gCtrl = new AbortController();
+        const gKill = window.setTimeout(() => gCtrl.abort(), 4000);
+        const g = await fetch(`/api/rides/${saved}`, { signal: gCtrl.signal });
+        window.clearTimeout(gKill);
+        const gd = await g.json();
+        if (stop) return;
+        const r = gd.ride as Ride | undefined;
+        const age = r?.updated_at ? Date.now() - new Date(r.updated_at).getTime() : Infinity;
+        if (r?.status === "completed" && age < 6 * 3600 * 1000) {
+          setRide(r);
+          setDriver(gd.driver || null);
+          setDest({ lat: r.dest_lat, lng: r.dest_lng });
+          setPickup({ lat: r.pickup_lat, lng: r.pickup_lng });
+          if (sessionStorage.getItem(`dt-settled-${r.id}`) === "1") setSettled(true);
         } else {
-          const saved = sessionStorage.getItem(RIDE_KEY);
-          if (saved) {
-            const g = await fetch(`/api/rides/${saved}`);
-            const gd = await g.json();
-            const r = gd.ride as Ride | undefined;
-            const age = r?.updated_at ? Date.now() - new Date(r.updated_at).getTime() : Infinity;
-            if (r?.status === "completed" && age < 6 * 3600 * 1000) {
-              setRide(r);
-              setDriver(gd.driver || null);
-              setDest({ lat: r.dest_lat, lng: r.dest_lng });
-              setPickup({ lat: r.pickup_lat, lng: r.pickup_lng });
-              if (sessionStorage.getItem(`dt-settled-${r.id}`) === "1") setSettled(true);
-            } else {
-              sessionStorage.removeItem(RIDE_KEY);
-            }
-          }
+          sessionStorage.removeItem(RIDE_KEY);
         }
       } catch { /* home map still usable */ }
+    }
+
+    fetch("/api/auth/me").then((r) => r.json()).then((d) => {
+      if (stop) return;
+      if (!d.user) { window.clearTimeout(failSafe); router.replace("/login"); return; }
+      if (d.user.role === "driver") { window.clearTimeout(failSafe); router.replace("/driver"); return; }
+      if (d.user.role === "admin") { window.clearTimeout(failSafe); router.replace("/admin"); return; }
+      setUser(d.user);
+      // Unblock sheet immediately — rides restore runs in background.
+      setReady(true);
+      window.clearTimeout(failSafe);
+      void restoreRide();
+    }).catch(() => {
       if (!stop) setReady(true);
-    }).catch(() => { if (!stop) setReady(true); });
-    return () => { stop = true; };
+      window.clearTimeout(failSafe);
+    });
+    return () => { stop = true; window.clearTimeout(failSafe); };
   }, [router]);
 
   function adopt(r: Ride, drv?: DriverInfo | null) {
@@ -140,7 +161,8 @@ export default function PassengerHome() {
         setPickup(p);
       },
       () => {},
-      { enableHighAccuracy: true, timeout: 8000 },
+      // Fast path: Darkhan center is already set; refine GPS without blocking UI.
+      { enableHighAccuracy: false, timeout: 2500, maximumAge: 60_000 },
     );
   }, []);
 

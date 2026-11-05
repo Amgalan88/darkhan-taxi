@@ -31,7 +31,7 @@ export function PhonePad({
           disabled={k === ""}
           onClick={() => (k === "⌫" ? onBack() : k && onDigit(k))}
           style={{
-            height: 56,
+            height: 56, minHeight: 56,
             background: k ? "#fff" : "transparent",
             border: "none",
             borderRadius: 10,

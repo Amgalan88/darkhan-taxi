@@ -39,18 +39,35 @@ button { font-family: inherit; cursor: pointer; }
 }
 .cta {
   height: 72px;
-  background: var(--yellow);
-  color: var(--navy);
+  min-height: 72px;
+  background: #FFC300;
+  color: #0B2545;
   font-size: 26px;
 }
-.cta:disabled { opacity: 0.5; }
+.cta.cta-on,
+.cta:not(:disabled) {
+  background: #FFC300;
+  color: #0B2545;
+  opacity: 1;
+}
+.cta:disabled {
+  opacity: 1;
+  background: #FFC300;
+  color: rgba(11, 37, 69, 0.38);
+  cursor: not-allowed;
+}
 .sec {
   height: 60px;
+  min-height: 56px;
   background: #fff;
-  color: var(--navy);
-  border: 2px solid var(--navy);
+  color: #0B2545;
+  border: 2px solid #0B2545;
   font-size: 20px;
   margin-top: 12px;
+}
+.sec:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .green {
   height: 72px;

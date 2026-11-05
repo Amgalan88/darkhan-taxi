@@ -134,7 +134,7 @@ function LoginInner() {
           <>
             <div style={{ fontSize: 28, fontWeight: 800 }}>SMS код оруулна уу</div>
             <div className="small" style={{ marginTop: 8 }}>
-              +976 {phone.slice(0, 4)} •••• · демо код 1234
+              +976 {phone.slice(0, 4)} ••••
             </div>
             <div style={{ display: "flex", gap: 12, marginTop: 28 }}>
               {[0, 1, 2, 3].map((i) => (
@@ -154,10 +154,12 @@ function LoginInner() {
         )}
         {err && <div style={{ color: "#B42318", marginTop: 12, fontWeight: 700 }}>{err}</div>}
         <button
-          className="btn cta"
+          type="button"
+          className={`btn cta${activeLen >= max && !busy ? " cta-on" : ""}`}
           style={{ marginTop: 28 }}
           disabled={busy || activeLen < max}
-          onClick={() => (step === "phone" ? requestOtp() : verify())}
+          aria-disabled={busy || activeLen < max}
+          onClick={() => (step === "phone" ? void requestOtp() : void verify())}
         >
           Үргэлжлүүлэх
         </button>
