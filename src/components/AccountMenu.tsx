@@ -8,9 +8,11 @@ type Props = {
   name?: string;
   /** light text on navy header */
   light?: boolean;
+  /** frosted white chip over a map */
+  glass?: boolean;
 };
 
-export function AccountMenu({ phone, name, light }: Props) {
+export function AccountMenu({ phone, name, light, glass }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -32,7 +34,7 @@ export function AccountMenu({ phone, name, light }: Props) {
   }
 
   const fg = light ? "#fff" : "#0B2545";
-  const bg = light ? "rgba(255,255,255,.15)" : "#fff";
+  const bg = light ? "rgba(255,255,255,.15)" : glass ? "rgba(255,255,255,0.88)" : "#fff";
   const border = light ? "rgba(255,255,255,.35)" : "#D5DBE3";
 
   return (
@@ -45,6 +47,8 @@ export function AccountMenu({ phone, name, light }: Props) {
           width: 44, height: 44, borderRadius: 22,
           border: `2px solid ${border}`,
           background: bg, color: fg,
+          backdropFilter: glass ? "blur(8px)" : undefined,
+          WebkitBackdropFilter: glass ? "blur(8px)" : undefined,
           fontWeight: 800, fontSize: 18,
           display: "flex", alignItems: "center", justifyContent: "center",
         }}

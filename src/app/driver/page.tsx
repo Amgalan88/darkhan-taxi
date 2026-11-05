@@ -326,6 +326,7 @@ export default function DriverPage() {
   const carAt = !approach ? (active?.status === "arrived" && pickupPt ? pickupPt : (pos || DARKHAN_CENTER)) : null;
   const noCredit = balanceReady && balance <= 0;
   const jobMin = job ? Math.max(1, Math.round(Number(job.distance_km) * 2.5)) : 0;
+  const idle = Boolean(ready && !needsPlate && !waiting && !active && !pending && !job && !settlement && !confirmCancel);
 
   let heading = "Шинэ дуудлага алга";
   if (needsPlate && !active && !pending) heading = "Машины дугаар";
@@ -339,27 +340,67 @@ export default function DriverPage() {
   return (
     <div style={{ height: "100dvh", position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", top: "max(12px, env(safe-area-inset-top))", left: 12, right: 68, zIndex: 20, display: "flex", gap: 8, alignItems: "center" }}>
-        <div className="pill" style={{ flex: 1, height: 56, fontSize: 18, justifyContent: "flex-start" }}>
+        <div
+          className="pill"
+          style={{
+            flex: 1, height: 48, fontSize: 16, justifyContent: "flex-start",
+            background: "rgba(255,255,255,0.88)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+          }}
+        >
           Үлдэгдэл {balanceReady ? tugrik(balance) : "…"}
         </div>
-        <button type="button" className="btn cta" style={{ width: 148, height: noCredit ? 72 : 56, fontSize: 18 }} disabled={busy} onClick={() => { void topup(); }}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => { void topup(); }}
+          style={{
+            height: 48, width: "auto", padding: "0 16px", flex: "none",
+            border: "none", borderRadius: 16, background: "#FFC300", color: "#0B2545",
+            fontWeight: 800, fontSize: 16, cursor: busy ? "not-allowed" : "pointer",
+          }}
+        >
           Цэнэглэх
         </button>
       </div>
       {user && (
         <div style={{ position: "absolute", top: "max(12px, env(safe-area-inset-top))", right: 12, zIndex: 20 }}>
-          <AccountMenu phone={user.phone} name={user.name} />
+          <AccountMenu phone={user.phone} name={user.name} glass />
         </div>
       )}
       <TaxiMap pickup={pickupPt} dest={destPt} driver={carAt} approach={approach} />
-      <div className="sheet" style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 10, maxHeight: "46vh", overflow: "auto" }}>
-        <div className="handle" />
+      {idle && (
+        <div
+          className="pill"
+          style={{
+            position: "absolute", left: "50%", bottom: "calc(max(120px, min(16vh, 140px)) + 12px)", transform: "translateX(-50%)",
+            zIndex: 15, height: 40, maxWidth: "calc(100% - 24px)", fontSize: 15, fontWeight: 700,
+            background: "rgba(255,255,255,0.88)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+          }}
+        >
+          Газрын зураг дээр хүлээнэ
+        </div>
+      )}
+      <div
+        className="sheet"
+        style={{
+          position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 10, overflow: idle ? "hidden" : "auto",
+          height: idle ? "min(16vh, 140px)" : undefined,
+          minHeight: idle ? 120 : undefined,
+          maxHeight: idle ? 140 : "52vh",
+          background: "rgba(255,255,255,0.92)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          borderRadius: "28px 28px 0 0",
+          padding: idle ? "8px 20px 10px" : undefined,
+        }}
+      >
+        <div className="handle" style={idle ? { marginBottom: 8 } : undefined} />
         {!ready && <div style={{ fontWeight: 800, fontSize: 28 }}>Ачаалж байна…</div>}
-        {ready && <div style={{ fontSize: 28, fontWeight: 800 }} aria-live="polite">{heading}</div>}
+        {ready && <div style={{ fontSize: idle ? 24 : 28, fontWeight: 800, lineHeight: 1.2 }} aria-live="polite">{heading}</div>}
         {storedPlate && plateOk(storedPlate) && !needsPlate && (
           <div className="small" style={{ marginTop: 4 }}>{user?.driver?.car_color} · {user?.driver?.car_model} · {storedPlate}</div>
         )}
-        {noCredit && !active && !pending && (
+        {noCredit && !active && !pending && !idle && (
           <div style={{ marginTop: 8, fontWeight: 800, color: "#B42318" }}>Кредит цэнэглэнэ үү</div>
         )}
         {(note || topNote) && <div style={{ marginTop: 8, fontWeight: 700 }}>{note || topNote}</div>}
@@ -439,16 +480,13 @@ export default function DriverPage() {
           <div style={{ marginTop: 10 }}>
             <div className="big">{tugrik(fareOf(job))}</div>
             <div className="small" style={{ marginTop: 4 }}>{Number(job.distance_km).toFixed(1)} км · ~{jobMin} мин</div>
-            <button type="button" className="btn green" style={{ marginTop: 14 }} disabled={busy || !balanceReady || noCredit || !plateOk(storedPlate)} onClick={() => { void act(job.id, "accept"); }}>
+            <button type="button" className="btn green" style={{ marginTop: 14, height: 72, minHeight: 72 }} disabled={busy || !balanceReady || noCredit || !plateOk(storedPlate)} onClick={() => { void act(job.id, "accept"); }}>
               Авах
             </button>
             <button type="button" className="btn sec" disabled={busy} onClick={() => setSkipped((s) => [...s, job.id])}>Татгалзах</button>
           </div>
         )}
 
-        {ready && !active && !pending && !job && !needsPlate && (
-          <div className="small" style={{ marginTop: 10 }}>Газрын зураг дээр хүлээнэ.</div>
-        )}
       </div>
     </div>
   );
