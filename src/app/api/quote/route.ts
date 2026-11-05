@@ -19,7 +19,6 @@ export async function POST(req: Request) {
       price,
       eta_min: mins,
       source,
-      tariff,
     });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
