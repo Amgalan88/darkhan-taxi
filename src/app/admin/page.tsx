@@ -180,7 +180,10 @@ export default function AdminPage() {
         {ready && tab === "trips" && (
           <div style={{ marginTop: 12 }}>
             {trips.length === 0 && <div>Аялал алга</div>}
-            {trips.map((t) => (
+            {trips.filter((t) => {
+              const label = t.dest_label || "";
+              return !(label.startsWith("ТӨЛБӨР|") || label.startsWith("ТӨЛСӨН|") || label.startsWith("КРЕДИТ|") || label.startsWith("ШИМТГЭЛ|"));
+            }).map((t) => (
               <button
                 key={t.id}
                 type="button"

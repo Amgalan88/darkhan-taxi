@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getSessionToken } from '@/lib/session';
 import { rpc } from '@/lib/rpc';
+import { findDue } from '@/lib/ledger';
+import type { Me } from '@/lib/ride';
 
 export async function GET() {
   try {
@@ -17,6 +19,13 @@ export async function POST(req: Request) {
   try {
     const token = await getSessionToken();
     if (!token) return NextResponse.json({ error: 'Нэвтэрнэ үү' }, { status: 401 });
+    const me = await rpc<Me>('taxi_me', { p_token: token });
+    if (me.role === 'passenger') {
+      const due = await findDue(me.id);
+      if (due) {
+        return NextResponse.json({ error: 'Эхлээд өмнөх төлбөрөө батална уу', due }, { status: 409 });
+      }
+    }
     const b = await req.json();
     const ride = await rpc('taxi_create_ride', {
       p_token: token,

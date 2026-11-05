@@ -208,6 +208,25 @@ export default function DriverPage() {
     }
   }
 
+  async function markCash(id: string) {
+    setBusy(true); setErr("");
+    try {
+      const res = await fetch(`/api/rides/${id}/pay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method: "driver_cash" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Алдаа");
+      setSettlement(data.settlement);
+      if (typeof data.settlement?.balanceAfter === "number") setBalance(data.settlement.balanceAfter);
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function topup() {
     setBusy(true); setErr("");
     try {
@@ -290,7 +309,7 @@ export default function DriverPage() {
         </div>
       )}
       <TaxiMap pickup={pickupPt} dest={destPt} driver={carAt} approach={approach} />
-      <div className="sheet" style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 10, maxHeight: "52vh", overflow: "auto" }}>
+      <div className="sheet" style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 10, maxHeight: "46vh", overflow: "auto" }}>
         <div className="handle" />
         {!ready && <div style={{ fontWeight: 800, fontSize: 28 }}>Ачаалж байна…</div>}
         {ready && <div style={{ fontSize: 28, fontWeight: 800 }} aria-live="polite">{heading}</div>}
@@ -358,13 +377,25 @@ export default function DriverPage() {
         )}
 
         {!settlement && pending && (
-          <div className="small" style={{ marginTop: 10 }}>Зорчигч QPay эсвэл «Жолооч бэлнээр авсан» гэж батална.</div>
+          <div style={{ marginTop: 8 }}>
+            <div className="big">{tugrik(fareOf(pending))}</div>
+            <div className="small" style={{ marginTop: 4 }}>QPay төлөгдөөгүй бол</div>
+            <button
+              type="button"
+              className="btn cta"
+              style={{ marginTop: 10 }}
+              disabled={busy}
+              onClick={() => { void markCash(pending.id); }}
+            >
+              Бэлнээр авсан
+            </button>
+          </div>
         )}
 
         {ready && !needsPlate && !waiting && !active && !pending && job && (
           <div style={{ marginTop: 10 }}>
-            <div style={{ fontWeight: 800, fontSize: 20 }}>{Number(job.distance_km).toFixed(1)} км · {jobMin} мин</div>
-            <div className="big" style={{ marginTop: 8 }}>{tugrik(fareOf(job))}</div>
+            <div className="big">{tugrik(fareOf(job))}</div>
+            <div className="small" style={{ marginTop: 4 }}>{Number(job.distance_km).toFixed(1)} км · ~{jobMin} мин</div>
             <button type="button" className="btn green" style={{ marginTop: 14 }} disabled={busy || noCredit || !plateOk(storedPlate)} onClick={() => { void act(job.id, "accept"); }}>
               Авах
             </button>
