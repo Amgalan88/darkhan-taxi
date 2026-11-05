@@ -36,14 +36,18 @@ export default function AdminPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [base, setBase] = useState(3000);
   const [perKm, setPerKm] = useState(1000);
+  const [pct, setPct] = useState(10);
+  const [credits, setCredits] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
   async function load() {
-    const [t, d, tar] = await Promise.all([
+    const [t, d, tar, com, cred] = await Promise.all([
       fetch("/api/admin/trips").then((r) => r.json()).catch(() => ({})),
       fetch("/api/admin/drivers").then((r) => r.json()).catch(() => ({})),
       fetch("/api/admin/tariff").then((r) => r.json()).catch(() => ({})),
+      fetch("/api/admin/commission").then((r) => r.json()).catch(() => ({})),
+      fetch("/api/admin/credit").then((r) => r.json()).catch(() => ({})),
     ]);
     if (t.trips) setTrips(t.trips);
     if (t.error) setErr(t.error);
@@ -53,6 +57,37 @@ export default function AdminPage() {
       setBase(tar.tariff.base_fare);
       setPerKm(tar.tariff.per_km);
     }
+    if (typeof com.commissionPct === "number") setPct(com.commissionPct);
+    if (cred.balances) {
+      const next: Record<string, string> = {};
+      for (const [id, n] of Object.entries(cred.balances as Record<string, number>)) next[id] = String(n);
+      setCredits((prev) => ({ ...next, ...prev }));
+    }
+  }
+
+  async function saveCommission() {
+    setErr("");
+    const res = await fetch("/api/admin/commission", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commission_pct: pct }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setErr(data.error || "Алдаа"); return; }
+    setMsg("Шимтгэл хадгаллаа");
+    if (typeof data.commissionPct === "number") setPct(data.commissionPct);
+  }
+
+  async function saveCredit(userId: string) {
+    setErr("");
+    const res = await fetch("/api/admin/credit", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, balance: Number(credits[userId] || 0) }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setErr(data.error || "Алдаа"); return; }
+    setMsg("Кредит засагдлаа");
   }
 
   useEffect(() => {
@@ -174,7 +209,16 @@ export default function AdminPage() {
             {drivers.map((d) => (
               <div key={d.user_id} style={{ marginBottom: 12 }}>
                 <div style={{ fontWeight: 800 }}>{d.name || "Жолооч"} · {d.plate || "дугааргүй"}</div>
-                <div className="small">{d.phone} · {d.car_model || "Машин"} · {d.approved ? "Зөвшөөрсөн" : "Хүлээгдэж буй"}</div>
+                <div className="small">{d.phone} · {d.car_model || "Машин"} · {d.plate || "дугааргүй"} · {d.approved ? "Зөвшөөрсөн" : "Хүлээгдэж буй"}</div>
+                <label className="label" htmlFor={`cr-${d.user_id}`} style={{ display: "block", marginTop: 8 }}>Кредит (₮)</label>
+                <input
+                  id={`cr-${d.user_id}`}
+                  type="number"
+                  value={credits[d.user_id] ?? "0"}
+                  onChange={(e) => setCredits((prev) => ({ ...prev, [d.user_id]: e.target.value }))}
+                  style={{ width: "100%", height: 56, fontSize: 22, fontWeight: 800, borderRadius: 16, border: "2px solid #D5DBE3", padding: "0 16px" }}
+                />
+                <button type="button" className="btn sec" onClick={() => { void saveCredit(d.user_id); }}>Кредит хадгалах</button>
                 <button
                   type="button"
                   className="btn cta"
@@ -207,7 +251,17 @@ export default function AdminPage() {
               onChange={(e) => setPerKm(Number(e.target.value))}
               style={{ width: "100%", height: 64, fontSize: 24, fontWeight: 700, borderRadius: 16, border: "2px solid #D5DBE3", padding: "0 16px" }}
             />
-            <button className="btn cta" style={{ marginTop: 16 }} type="button" onClick={() => { void saveTariff(); }}>Хадгалах</button>
+            <label className="label" htmlFor="pct" style={{ display: "block", marginTop: 12 }}>Жолоочийн шимтгэл (%)</label>
+            <input
+              id="pct"
+              type="number"
+              value={pct}
+              onChange={(e) => setPct(Number(e.target.value))}
+              style={{ width: "100%", height: 64, fontSize: 24, fontWeight: 700, borderRadius: 16, border: "2px solid #D5DBE3", padding: "0 16px" }}
+            />
+            <div className="small" style={{ marginTop: 8 }}>Зорчигчид харагдахгүй. Анхны утга 10%.</div>
+            <button className="btn sec" type="button" onClick={() => { void saveCommission(); }}>Шимтгэл хадгалах</button>
+            <button className="btn cta" style={{ marginTop: 12 }} type="button" onClick={() => { void saveTariff(); }}>Хадгалах</button>
           </div>
         )}
       </div>

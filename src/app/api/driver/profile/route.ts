@@ -20,10 +20,10 @@ export async function POST(req: Request) {
 
     await rpc('taxi_register_driver', {
       p_token: token,
-      p_name: me.name || 'Жолооч',
+      p_name: String(body.name || me.name || 'Жолооч'),
       p_plate: plate,
-      p_car_model: me.driver?.car_model || 'Машин',
-      p_car_color: me.driver?.car_color || 'Цагаан',
+      p_car_model: String(body.car_model || me.driver?.car_model || 'Машин'),
+      p_car_color: String(body.car_color || me.driver?.car_color || 'Цагаан'),
     });
     const user = await rpc<Me>('taxi_me', { p_token: token });
     if (plateError(user.driver?.plate || '')) {

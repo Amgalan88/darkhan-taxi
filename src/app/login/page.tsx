@@ -15,6 +15,14 @@ function LoginInner() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [existing, setExisting] = useState<{ phone: string; name: string; role: string } | null>(null);
+  const [left, setLeft] = useState(30);
+
+  useEffect(() => {
+    if (step !== "code") return;
+    setLeft(30);
+    const t = window.setInterval(() => setLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
+    return () => window.clearInterval(t);
+  }, [step]);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -46,6 +54,7 @@ function LoginInner() {
       if (!res.ok) throw new Error(data.error || "Алдаа");
       setStep("code");
       setCode("");
+      setLeft(30);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -81,7 +90,7 @@ function LoginInner() {
   return (
     <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", paddingBottom: 200 }}>
       <div className="top">
-        <div style={{ fontSize: 32, fontWeight: 800, marginTop: 8 }}>Дархан Такси</div>
+        <div style={{ fontSize: 32, fontWeight: 800, marginTop: 8 }}>DMAP</div>
       </div>
       <div style={{ padding: "28px 24px" }}>
         {existing && step === "phone" && (
@@ -153,13 +162,23 @@ function LoginInner() {
           Үргэлжлүүлэх
         </button>
         {step === "code" && (
-          <button
-            type="button"
-            className="btn sec"
-            onClick={() => { setStep("phone"); setCode(""); }}
-          >
-            Дугаар солих
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn sec"
+              disabled={left > 0 || busy}
+              onClick={() => { void requestOtp(); }}
+            >
+              {left > 0 ? `Дахин илгээх · ${left}с` : "Дахин илгээх"}
+            </button>
+            <button
+              type="button"
+              className="btn sec"
+              onClick={() => { setStep("phone"); setCode(""); }}
+            >
+              Дугаар солих
+            </button>
+          </>
         )}
       </div>
       <PhonePad

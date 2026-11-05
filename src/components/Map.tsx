@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { DARKHAN_CENTER, approachMs, haversineKm } from "@/lib/geo";
@@ -9,9 +9,12 @@ import { spawnCars, stepCars, type DemoCar, type Pt } from "@/lib/demoCars";
 
 const passengerIcon = L.divIcon({
   className: "",
-  html: `<div style="width:22px;height:22px;border-radius:50%;background:#1D4ED8;border:4px solid #fff;box-shadow:0 0 0 8px rgba(29,78,216,.25)"></div>`,
-  iconSize: [22, 22],
-  iconAnchor: [11, 11],
+  html: `<div style="display:flex;flex-direction:column;align-items:center;width:160px">
+    <div style="width:22px;height:22px;border-radius:50%;background:#1D4ED8;border:4px solid #fff;box-shadow:0 0 0 8px rgba(29,78,216,.25)"></div>
+    <div style="margin-top:6px;background:#fff;color:#0B2545;font-weight:800;font-size:18px;line-height:1.2;padding:4px 10px;border-radius:10px;white-space:nowrap;box-shadow:0 2px 8px rgba(11,37,69,.18)">Таны байршил</div>
+  </div>`,
+  iconSize: [160, 70],
+  iconAnchor: [80, 15],
 });
 
 const destIcon = L.divIcon({
@@ -21,18 +24,20 @@ const destIcon = L.divIcon({
   iconAnchor: [9, 9],
 });
 
+const carSvg = `<svg width="26" height="16" viewBox="0 0 26 16" aria-hidden="true"><path fill="#0B2545" d="M3.5 10.5 6 5h14l2.5 5.5H3.5zM6 12a2 2 0 1 0 .001 4.001A2 2 0 0 0 6 12zm14 0a2 2 0 1 0 .001 4.001A2 2 0 0 0 20 12z"/></svg>`;
+
 const carIcon = L.divIcon({
   className: "",
-  html: `<div style="background:#FFC300;border:3px solid #0B2545;border-radius:10px;padding:4px 6px;font-size:16px;line-height:1">🚕</div>`,
-  iconSize: [40, 30],
-  iconAnchor: [20, 15],
+  html: `<div style="background:#FFC300;border:3px solid #0B2545;border-radius:10px;padding:5px 7px;line-height:0">${carSvg}</div>`,
+  iconSize: [44, 32],
+  iconAnchor: [22, 16],
 });
 
 const idleCarIcon = L.divIcon({
   className: "",
-  html: `<div style="background:#fff;border:2px solid #0B2545;border-radius:8px;padding:2px 4px;font-size:13px;line-height:1;opacity:.92">🚕</div>`,
-  iconSize: [32, 24],
-  iconAnchor: [16, 12],
+  html: `<div style="background:#fff;border:2px solid #0B2545;border-radius:8px;padding:3px 5px;line-height:0;opacity:.95">${carSvg}</div>`,
+  iconSize: [36, 26],
+  iconAnchor: [18, 13],
 });
 
 function stopClick(e: L.LeafletMouseEvent) {
@@ -182,6 +187,18 @@ export default function TaxiMap({ pickup, dest, driver, cars, demoOrigin, approa
         />
         <ClickHandler onPickDest={onPickDest} />
         <FitBounds points={fitPoints} />
+        {pickup && dest && (
+          <Polyline
+            positions={[[pickup.lat, pickup.lng], [dest.lat, dest.lng]]}
+            pathOptions={{ color: "#0B2545", weight: 4, opacity: 0.8 }}
+          />
+        )}
+        {approach?.hint && (
+          <Polyline
+            positions={[[approach.hint.lat, approach.hint.lng], [approach.to.lat, approach.to.lng]]}
+            pathOptions={{ color: "#16733A", weight: 4, dashArray: "8 10" }}
+          />
+        )}
         {pickup && <Marker position={[pickup.lat, pickup.lng]} icon={passengerIcon} eventHandlers={{ click: stopClick }} />}
         {dest && <Marker position={[dest.lat, dest.lng]} icon={destIcon} eventHandlers={{ click: stopClick }} />}
         {driver && !approach && <MovingMarker position={driver} icon={carIcon} z={600} />}

@@ -3,6 +3,7 @@ import { getSessionToken } from '@/lib/session';
 import { rpc } from '@/lib/rpc';
 import { plateError } from '@/lib/plate';
 import type { Me, Ride } from '@/lib/ride';
+import { getBalance } from '@/lib/ledger';
 
 const FNS: Record<string, string> = {
   accept: 'taxi_accept_ride',
@@ -52,19 +53,19 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       if (me?.role === 'driver' && me.driver && me.driver.approved === false) {
         return NextResponse.json({ error: 'Админ зөвшөөрөөгүй байна' }, { status: 400 });
       }
+      if (me?.role === 'driver' && getBalance(me.id) <= 0) {
+        return NextResponse.json({ error: 'Кредит цэнэглэнэ үү' }, { status: 400 });
+      }
     }
 
     if (action === 'cancel' || action === 'cash' || action === 'finish' || action === 'complete') {
       const { me, ride } = await meAndRide(token, id);
       if (!ride) return NextResponse.json({ error: 'Аялал олдсонгүй' }, { status: 404 });
       if (action === 'cancel') {
-        // taxi_cancel_ride only succeeds for the passenger. A driver button would just error.
-        const passengerOk = me.role === 'passenger' && ['requested', 'accepted', 'arrived'].includes(ride.status);
-        if (!passengerOk) {
-          const message = me.role === 'driver' || me.role === 'admin'
-            ? 'Зорчигч цуцална'
-            : 'Энэ үед цуцлах боломжгүй';
-          return NextResponse.json({ error: message }, { status: 400 });
+        const passengerOk = me.role === 'passenger' && ['requested', 'accepted'].includes(ride.status);
+        const driverOk = (me.role === 'driver' || me.role === 'admin') && ride.status === 'accepted';
+        if (!passengerOk && !driverOk) {
+          return NextResponse.json({ error: 'Энэ үед цуцлах боломжгүй' }, { status: 400 });
         }
       } else {
         if (me.role !== 'driver' && me.role !== 'admin') {

@@ -16,6 +16,8 @@ export type Ride = {
   passenger_name?: string;
   driver_phone?: string | null;
   driver_name?: string | null;
+  driver_id?: string | null;
+  passenger_id?: string | null;
 };
 
 export type DriverInfo = {

@@ -1,7 +1,7 @@
 {
-  "name": "Дархан Такси",
-  "short_name": "Дархан Такси",
-  "description": "Дарханы такси дуудлага",
+  "name": "DMAP",
+  "short_name": "DMAP",
+  "description": "Дархан хотын такси",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F4F6F9",

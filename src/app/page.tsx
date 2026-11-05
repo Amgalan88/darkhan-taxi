@@ -3,12 +3,11 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DARKHAN_CENTER, approachFrom, nearDarkhan } from "@/lib/geo";
+import { DARKHAN_CENTER, approachFrom, haversineKm, nearDarkhan } from "@/lib/geo";
 import { tugrik } from "@/lib/format";
 import { supabasePublic } from "@/lib/supabase";
 import { AccountMenu } from "@/components/AccountMenu";
-import { useQpaySignal } from "@/lib/useQpaySignal";
-import { QPAY_KEY, RIDE_KEY, fareOf, isLive, type DriverInfo, type Ride } from "@/lib/ride";
+import { RIDE_KEY, fareOf, isLive, type DriverInfo, type Ride } from "@/lib/ride";
 
 const TaxiMap = dynamic(() => import("@/components/Map"), { ssr: false });
 
@@ -33,9 +32,13 @@ export default function PassengerHome() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
-  const [qpayPaid, setQpayPaid] = useState(false);
   const [qpayNote, setQpayNote] = useState("");
-  const [qpayAsk, setQpayAsk] = useState(false);
+  const [offer, setOffer] = useState<number | null>(null);
+  const [offerOpen, setOfferOpen] = useState(false);
+  const [payChoice, setPayChoice] = useState<"qpay" | "driver_cash" | null>(null);
+  const [settled, setSettled] = useState(false);
+  const [stars, setStars] = useState(0);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [approachHint, setApproachHint] = useState<{ lat: number; lng: number } | null>(null);
   const quoteSeq = useRef(0);
   const approachFor = useRef<string | null>(null);
@@ -45,7 +48,7 @@ export default function PassengerHome() {
   const clearLocal = useCallback((id?: string | null) => {
     try {
       sessionStorage.removeItem(RIDE_KEY);
-      if (id) localStorage.removeItem(QPAY_KEY(id));
+      if (id) sessionStorage.removeItem(`dt-settled-${id}`);
     } catch { /* ignore */ }
   }, []);
 
@@ -57,9 +60,13 @@ export default function PassengerHome() {
     setDriver(null);
     setDest(null);
     setQuote(null);
-    setQpayPaid(false);
+    setOffer(null);
+    setOfferOpen(false);
+    setPayChoice(null);
+    setSettled(false);
+    setStars(0);
     setQpayNote("");
-    setQpayAsk(false);
+    setConfirmCancel(false);
     setErr("");
     setNote(message);
   }, [clearLocal]);
@@ -95,7 +102,7 @@ export default function PassengerHome() {
               setDriver(gd.driver || null);
               setDest({ lat: r.dest_lat, lng: r.dest_lng });
               setPickup({ lat: r.pickup_lat, lng: r.pickup_lng });
-              if (localStorage.getItem(QPAY_KEY(r.id)) === "1") setQpayPaid(true);
+              if (sessionStorage.getItem(`dt-settled-${r.id}`) === "1") setSettled(true);
             } else {
               sessionStorage.removeItem(RIDE_KEY);
             }
@@ -113,12 +120,15 @@ export default function PassengerHome() {
     setPickup({ lat: Number(r.pickup_lat), lng: Number(r.pickup_lng) });
     setDest({ lat: Number(r.dest_lat), lng: Number(r.dest_lng) });
     setDestLabel(r.dest_label || "");
-    let paid = false;
+    let donePay = false;
     try {
       sessionStorage.setItem(RIDE_KEY, r.id);
-      paid = localStorage.getItem(QPAY_KEY(r.id)) === "1";
+      donePay = sessionStorage.getItem(`dt-settled-${r.id}`) === "1";
     } catch { /* ignore */ }
-    setQpayPaid(paid);
+    setSettled(donePay);
+    setPayChoice(null);
+    setConfirmCancel(false);
+    setStars(0);
   }
 
   useEffect(() => {
@@ -176,8 +186,9 @@ export default function PassengerHome() {
           setDriver(null);
           setDest(null);
           setQuote(null);
-          setQpayPaid(false);
-          setQpayAsk(false);
+          setSettled(false);
+          setPayChoice(null);
+          setConfirmCancel(false);
           setNote("Аялал цуцлагдлаа");
           clearLocal(id);
           return;
@@ -210,13 +221,9 @@ export default function PassengerHome() {
     setApproachHint(approachFrom(gps, { lat: Number(ride.pickup_lat), lng: Number(ride.pickup_lng) }));
   }, [ride?.status, ride?.id, ride?.pickup_lat, ride?.pickup_lng, driver?.lat, driver?.lng]);
 
-  const announce = useQpaySignal(ride && isLive(ride.status) ? ride.id : null, () => {});
   useEffect(() => {
-    if (!qpayPaid || ride?.status !== "arrived") return;
-    announce();
-    const t = window.setInterval(announce, 2000);
-    return () => window.clearInterval(t);
-  }, [qpayPaid, ride?.status, announce]);
+    if (quote) setOffer(quote.price);
+  }, [quote?.price]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function callTaxi() {
     if (!pickup || !dest || !quote || busy) return;
@@ -228,7 +235,8 @@ export default function PassengerHome() {
         body: JSON.stringify({
           pickup_lat: pickup.lat, pickup_lng: pickup.lng, pickup_label: "Таны байршил",
           dest_lat: dest.lat, dest_lng: dest.lng, dest_label: destLabel || "Очих газар",
-          distance_km: quote.distance_km, price: quote.price, offered_price: null,
+          distance_km: quote.distance_km, price: quote.price,
+          offered_price: offer != null && offer !== quote.price ? offer : null,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -243,7 +251,7 @@ export default function PassengerHome() {
 
   async function cancel() {
     if (!ride || busy) return;
-    if (!confirm("Дуудлагаа цуцлах уу?")) return;
+    setConfirmCancel(false);
     setBusy(true); setErr("");
     try {
       const res = await fetch(`/api/rides/${ride.id}`, {
@@ -261,21 +269,20 @@ export default function PassengerHome() {
     }
   }
 
-  async function payQpay() {
-    if (!ride || busy) return;
+  async function confirmPay() {
+    if (!ride || busy || !payChoice) return;
     setBusy(true); setErr("");
     try {
       const res = await fetch(`/api/rides/${ride.id}/pay`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ method: "qpay" }),
+        body: JSON.stringify({ method: payChoice }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Алдаа");
-      setQpayPaid(true);
-      setQpayNote(data.message || "Туршилтын төлбөр.");
-      setQpayAsk(false);
-      try { localStorage.setItem(QPAY_KEY(ride.id), "1"); } catch { /* ignore */ }
+      setSettled(true);
+      setQpayNote(data.message || "");
+      try { sessionStorage.setItem(`dt-settled-${ride.id}`, "1"); } catch { /* ignore */ }
     } catch (e) {
       setErr(errText(e));
     } finally {
@@ -289,15 +296,24 @@ export default function PassengerHome() {
   const phone = driver?.phone || "";
   const fare = ride ? fareOf(ride) : quote?.price || 0;
 
+  const approachKm = ride?.status === "accepted" && approachHint
+    ? haversineKm(approachHint, { lat: Number(ride.pickup_lat), lng: Number(ride.pickup_lng) })
+    : 0;
+  const etaMin = Math.max(1, Math.round((approachKm || 1) * 2.5));
+
   let heading = "Хаашаа явах вэ?";
   if (ride?.status === "requested") heading = "Жолооч хайж байна…";
-  else if (ride?.status === "accepted") heading = "Жолооч ирж байна";
-  else if (ride?.status === "arrived") heading = qpayPaid ? "QPay бүртгэгдлээ" : "Жолооч ирлээ";
-  else if (done) heading = qpayPaid ? "QPay-ээр төлөгдлөө" : "Аялал дууслаа";
+  else if (ride?.status === "accepted") heading = `${etaMin} минутад ирнэ`;
+  else if (ride?.status === "arrived") heading = "Аялалд явж байна";
+  else if (done && !settled) heading = "Төлбөр";
+  else if (done && settled) heading = "Баярлалаа";
 
   const approach = ride?.status === "accepted" && approachHint
     ? { id: ride.id, to: { lat: Number(ride.pickup_lat), lng: Number(ride.pickup_lng) }, hint: approachHint }
     : null;
+  const showDriver = ride && (ride.status === "accepted" || ride.status === "arrived");
+  const canCancel = ride?.status === "requested" || ride?.status === "accepted";
+  const chosenFare = offer ?? quote?.price ?? 0;
 
   return (
     <div style={{ height: "100dvh", position: "relative", overflow: "hidden" }}>
@@ -310,88 +326,141 @@ export default function PassengerHome() {
         pickup={pickup}
         dest={dest}
         driver={ride?.status === "arrived" ? { lat: Number(ride.pickup_lat), lng: Number(ride.pickup_lng) } : null}
-        demoOrigin={done ? null : pickup}
+        demoOrigin={ride && ride.status !== "requested" ? null : pickup}
         approach={approach}
         onPickDest={live || done ? undefined : onPickDest}
       />
-      <div className="sheet" style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 10, maxHeight: "52vh", overflow: "auto" }}>
+      <div className="sheet" style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 10, maxHeight: "58vh", overflow: "auto" }}>
         <div className="handle" />
-        {!ready && <div style={{ fontWeight: 800, fontSize: 22 }}>Ачаалж байна…</div>}
-        {ready && <div style={{ fontSize: 26, fontWeight: 800 }} aria-live="polite">{heading}</div>}
+        {!ready && <div style={{ fontWeight: 800, fontSize: 28 }}>Ачаалж байна…</div>}
+        {ready && (
+          <div style={{ fontSize: ride?.status === "accepted" ? 32 : 28, fontWeight: 800 }} aria-live="polite">
+            {heading}
+          </div>
+        )}
 
         {ready && !ride && (
           <>
-            <div className="field" style={{ marginTop: 12 }}>
+            <div className="field" style={{ marginTop: 12, minHeight: 64 }}>
               <span style={{ width: 16, height: 16, borderRadius: "50%", background: "#FFC300", border: "3px solid #0B2545", flex: "none" }} />
               <span>{dest ? (destLabel || "Сонгосон цэг") : "Газрын зураг дээр дарна уу"}</span>
             </div>
+            {quote && <div className="big" style={{ marginTop: 12 }}>{tugrik(chosenFare)}</div>}
             {quote && (
-              <div style={{ marginTop: 12, fontWeight: 800, fontSize: 22 }}>
-                {tugrik(quote.price)} · {quote.distance_km} км · ≈ {quote.eta_min} мин
+              <button type="button" className="quiet" onClick={() => setOfferOpen((v) => !v)}>
+                {offerOpen ? "Нуух" : "Өөрөө үнэ санал болгох"}
+              </button>
+            )}
+            {quote && offerOpen && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
+                <button type="button" className="step" aria-label="Үнэ хасах" onClick={() => setOffer((o) => Math.max(500, (o ?? quote.price) - 500))}>−</button>
+                <div style={{ fontSize: 28, fontWeight: 800 }}>{tugrik(chosenFare)}</div>
+                <button type="button" className="step" aria-label="Үнэ нэмэх" onClick={() => setOffer((o) => (o ?? quote.price) + 500)}>+</button>
               </div>
             )}
           </>
         )}
 
-        {driver && (live || done) && (ride?.status !== "requested") && (
-          <div style={{ marginTop: 10 }}>
-            <div style={{ fontWeight: 800 }}>{driver.name || "Жолооч"}</div>
-            <div className="small">{[driver.car_color, driver.car_model].filter(Boolean).join(" · ") || "Машин"}</div>
-            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-              <div style={{ flex: 1, minHeight: 64, border: "3px solid #0B2545", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, fontWeight: 800, background: "#fff" }}>
-                {plate || "—"}
-              </div>
-              {phone && (
-                <a className="btn green" style={{ flex: 1, height: 64, fontSize: 22, textDecoration: "none" }} href={`tel:+976${phone}`}>
-                  Залгах
-                </a>
-              )}
+        {ride?.status === "requested" && (
+          <div className="spin" style={{ marginTop: 16 }} aria-hidden="true" />
+        )}
+
+        {showDriver && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontWeight: 800, fontSize: 22 }}>{driver?.name || "Жолооч"}</div>
+            <div className="small">{[driver?.car_color, driver?.car_model].filter(Boolean).join(" · ") || "Машин"}</div>
+            <div style={{ marginTop: 12, minHeight: 72, border: "3px solid #0B2545", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, fontWeight: 800, background: "#fff" }}>
+              {plate || "—"}
             </div>
           </div>
         )}
 
-        {ride && (live || done) && (
-          <div style={{ marginTop: 10, fontWeight: 800, fontSize: 22 }}>{tugrik(fare)}</div>
+        {ride?.status === "arrived" && (
+          <div style={{ marginTop: 12, fontWeight: 800, fontSize: 20 }}>Очих газар · {ride.dest_label || "Сонгосон цэг"}</div>
         )}
 
-        {qpayPaid && ride?.status === "arrived" && (
-          <div className="small" style={{ marginTop: 8 }}>{qpayNote || "Туршилтын QPay. Жолооч дуусгана."}</div>
+        {done && !settled && (
+          <>
+            <div className="small" style={{ marginTop: 8 }}>{ride?.dest_label || "Аялал"}</div>
+            <div className="big" style={{ marginTop: 8 }}>{tugrik(fare)}</div>
+            {(["qpay", "driver_cash"] as const).map((key) => {
+              const on = payChoice === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setPayChoice(key)}
+                  style={{
+                    width: "100%", height: 80, marginTop: 12, borderRadius: 16,
+                    border: on ? "3px solid #0B2545" : "2px solid #D5DBE3",
+                    background: on ? "#FFC300" : "#fff",
+                    color: "#0B2545", fontWeight: 800, fontSize: 22,
+                  }}
+                >
+                  {key === "qpay" ? "QPay" : "Жолооч бэлнээр авсан"}
+                </button>
+              );
+            })}
+          </>
         )}
-        {done && (
-          <div className="small" style={{ marginTop: 8 }}>
-            {qpayPaid ? (qpayNote || "Туршилтын QPay-ээр бүртгэгдлээ.") : "Жолооч бэлнээр авсан."}
-          </div>
+
+        {done && settled && (
+          <>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  aria-label={`${n} од`}
+                  onClick={() => setStars(n)}
+                  style={{
+                    flex: 1, height: 56, borderRadius: 14, border: "2px solid #0B2545",
+                    background: n <= stars ? "#FFC300" : "#fff", fontWeight: 800, fontSize: 22, color: "#0B2545",
+                  }}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+            {qpayNote && <div className="small" style={{ marginTop: 10 }}>{qpayNote}</div>}
+          </>
         )}
+
         {note && <div style={{ marginTop: 8, fontWeight: 700 }}>{note}</div>}
         {err && <div style={{ color: "#B42318", marginTop: 8, fontWeight: 700 }}>{err}</div>}
 
-        {ready && !ride && quote && (
-          <button className="btn cta" style={{ marginTop: 14 }} disabled={busy} onClick={() => { void callTaxi(); }}>
+        {confirmCancel && (
+          <>
+            <div style={{ marginTop: 12, fontWeight: 800, fontSize: 22 }}>Цуцлах уу?</div>
+            <button type="button" className="btn cta" style={{ marginTop: 12, background: "#B42318", color: "#fff" }} disabled={busy} onClick={() => { void cancel(); }}>
+              Тийм, цуцлах
+            </button>
+            <button type="button" className="btn sec" disabled={busy} onClick={() => setConfirmCancel(false)}>Буцах</button>
+          </>
+        )}
+
+        {!confirmCancel && ready && !ride && quote && (
+          <button type="button" className="btn cta" style={{ marginTop: 14 }} disabled={busy} onClick={() => { void callTaxi(); }}>
             Дуудах
           </button>
         )}
 
-        {ride?.status === "arrived" && !qpayPaid && !qpayAsk && (
-          <button className="btn cta" style={{ marginTop: 14 }} disabled={busy} onClick={() => { setErr(""); setQpayAsk(true); }}>
-            QPay-ээр төлөх
+        {!confirmCancel && showDriver && phone && (
+          <a className="btn green" style={{ marginTop: 14, textDecoration: "none" }} href={`tel:+976${phone}`}>Залгах</a>
+        )}
+
+        {!confirmCancel && done && !settled && (
+          <button type="button" className="btn cta" style={{ marginTop: 14 }} disabled={busy || !payChoice} onClick={() => { void confirmPay(); }}>
+            Батлах
           </button>
         )}
-        {ride?.status === "arrived" && !qpayPaid && qpayAsk && (
-          <>
-            <div className="small" style={{ marginTop: 10 }}>Жинхэнэ QPay холболтгүй бол туршилтаар бүртгэнэ.</div>
-            <button className="btn cta" style={{ marginTop: 10 }} disabled={busy} onClick={() => { void payQpay(); }}>
-              Туршилтаар бүртгэх
-            </button>
-            <button type="button" className="quiet" onClick={() => setQpayAsk(false)}>Буцах</button>
-          </>
+
+        {!confirmCancel && done && settled && (
+          <button type="button" className="btn cta" style={{ marginTop: 14 }} onClick={() => reset("")}>Дуусгах</button>
         )}
 
-        {done && (
-          <button className="btn cta" style={{ marginTop: 14 }} onClick={() => reset("")}>Хаах</button>
-        )}
-
-        {live && !(qpayAsk && !qpayPaid) && (
-          <button type="button" className="quiet" disabled={busy} onClick={() => { void cancel(); }}>Цуцлах</button>
+        {!confirmCancel && canCancel && (
+          <button type="button" className="btn sec" disabled={busy} onClick={() => setConfirmCancel(true)}>Цуцлах</button>
         )}
       </div>
     </div>
