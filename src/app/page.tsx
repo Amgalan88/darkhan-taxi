@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { DARKHAN_CENTER } from "@/lib/geo";
 import { tugrik } from "@/lib/format";
 import { supabasePublic } from "@/lib/supabase";
+import { AccountMenu } from "@/components/AccountMenu";
 
 const TaxiMap = dynamic(() => import("@/components/Map"), { ssr: false });
 
@@ -165,8 +166,9 @@ export default function PassengerHome() {
   if (done && ride) {
     return (
       <div style={{ minHeight: "100dvh" }}>
-        <div className="top">
+        <div className="top" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
           <div style={{ fontSize: 30, fontWeight: 800, marginTop: 8 }}>Аялал дууслаа</div>
+          <AccountMenu phone={user.phone} name={user.name} light />
         </div>
         <div style={{ padding: 20 }}>
           <div className="card" style={{ background: "#fff", border: "2px solid #D5DBE3" }}>
@@ -205,6 +207,9 @@ export default function PassengerHome() {
 
   return (
     <div style={{ minHeight: "100dvh", position: "relative" }}>
+      <div style={{ position: "absolute", top: 12, right: 12, zIndex: 20 }}>
+        <AccountMenu phone={user.phone} name={user.name} />
+      </div>
       <TaxiMap
         pickup={pickup}
         dest={dest}

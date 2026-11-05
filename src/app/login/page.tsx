@@ -1,25 +1,42 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PhonePad } from "@/components/PhonePad";
-import { Suspense } from "react";
+import { resolvePostLoginPath } from "@/lib/roles";
 
 function LoginInner() {
   const router = useRouter();
   const sp = useSearchParams();
-  const next = sp.get("next") || "/";
+  const next = sp.get("next");
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [existing, setExisting] = useState<{ phone: string; name: string; role: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.user) setExisting({ phone: d.user.phone, name: d.user.name, role: d.user.role });
+      })
+      .catch(() => {});
+  }, []);
+
+  async function clearSession() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setExisting(null);
+  }
 
   async function requestOtp() {
     setErr("");
     if (phone.length !== 8) { setErr("8 оронтой дугаар оруулна уу"); return; }
     setBusy(true);
     try {
+      // Drop previous account so the new login cookie is the only session.
+      if (existing) await clearSession();
       const res = await fetch("/api/auth/request-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -28,6 +45,7 @@ function LoginInner() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Алдаа");
       setStep("code");
+      setCode("");
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -47,11 +65,9 @@ function LoginInner() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Алдаа");
-      const role = data.user?.role;
-      if (next !== "/") router.push(next);
-      else if (role === "driver") router.push("/driver");
-      else if (role === "admin") router.push("/admin");
-      else router.push("/");
+      const path = resolvePostLoginPath(data.user?.role, next);
+      router.replace(path);
+      router.refresh();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -59,7 +75,7 @@ function LoginInner() {
     }
   }
 
-  const active = step === "phone" ? phone : code;
+  const activeLen = step === "phone" ? phone.length : code.length;
   const max = step === "phone" ? 8 : 4;
 
   return (
@@ -68,9 +84,37 @@ function LoginInner() {
         <div style={{ fontSize: 32, fontWeight: 800, marginTop: 8 }}>Дархан Такси</div>
       </div>
       <div style={{ padding: "28px 24px" }}>
+        {existing && step === "phone" && (
+          <div className="card" style={{ background: "#fff", border: "2px solid #D5DBE3", marginBottom: 20 }}>
+            <div className="small">Одоо нэвтэрсэн</div>
+            <div style={{ fontWeight: 800 }}>{existing.name || existing.phone}</div>
+            <div className="small">+976 {existing.phone} · {existing.role}</div>
+            <button
+              type="button"
+              className="btn sec"
+              style={{ marginTop: 12, height: 56 }}
+              onClick={async () => {
+                await clearSession();
+              }}
+            >
+              Гарах
+            </button>
+            <button
+              type="button"
+              className="btn cta"
+              style={{ marginTop: 10, height: 56, fontSize: 20 }}
+              onClick={() => router.replace(resolvePostLoginPath(existing.role, next))}
+            >
+              Үргэлжлүүлэх
+            </button>
+          </div>
+        )}
+
         {step === "phone" ? (
           <>
-            <div style={{ fontSize: 28, fontWeight: 800 }}>Утасны дугаараа оруулна уу</div>
+            <div style={{ fontSize: 28, fontWeight: 800 }}>
+              {existing ? "Өөр дугаараар нэвтрэх" : "Утасны дугаараа оруулна уу"}
+            </div>
             <div className="small" style={{ marginTop: 8 }}>Бид танд SMS код илгээнэ</div>
             <div className="field" style={{ marginTop: 28, height: 76, fontSize: 30, borderColor: "#0B2545", borderWidth: 3 }}>
               <span style={{ borderRight: "2px solid #D5DBE3", paddingRight: 14 }}>+976</span>
@@ -84,7 +128,7 @@ function LoginInner() {
               +976 {phone.slice(0, 4)} •••• · демо код 1234
             </div>
             <div style={{ display: "flex", gap: 12, marginTop: 28 }}>
-              {[0,1,2,3].map((i) => (
+              {[0, 1, 2, 3].map((i) => (
                 <div
                   key={i}
                   style={{
@@ -103,7 +147,7 @@ function LoginInner() {
         <button
           className="btn cta"
           style={{ marginTop: 28 }}
-          disabled={busy || active.length < (step === "phone" ? 8 : 4)}
+          disabled={busy || activeLen < max}
           onClick={() => (step === "phone" ? requestOtp() : verify())}
         >
           Үргэлжлүүлэх
@@ -120,13 +164,15 @@ function LoginInner() {
       </div>
       <PhonePad
         onDigit={(d) => {
-          if (active.length >= max) return;
-          if (step === "phone") setPhone(phone + d);
-          else setCode(code + d);
+          if (step === "phone") {
+            setPhone((p) => (p.length >= 8 ? p : p + d));
+          } else {
+            setCode((c) => (c.length >= 4 ? c : c + d));
+          }
         }}
         onBack={() => {
-          if (step === "phone") setPhone(phone.slice(0, -1));
-          else setCode(code.slice(0, -1));
+          if (step === "phone") setPhone((p) => p.slice(0, -1));
+          else setCode((c) => c.slice(0, -1));
         }}
       />
     </div>

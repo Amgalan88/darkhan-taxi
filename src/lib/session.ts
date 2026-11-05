@@ -26,20 +26,25 @@ function unsign(value: string): string | null {
   }
 }
 
+const cookieBase = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+  path: '/',
+});
+
 export async function setSessionCookie(token: string) {
   const jar = await cookies();
   jar.set(COOKIE_NAME, sign(token), {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
+    ...cookieBase(),
     maxAge: 60 * 60 * 24 * 30,
   });
 }
 
 export async function clearSessionCookie() {
   const jar = await cookies();
-  jar.delete(COOKIE_NAME);
+  // Explicit expire — jar.delete alone can leave Secure cookies on some hosts.
+  jar.set(COOKIE_NAME, '', { ...cookieBase(), maxAge: 0 });
 }
 
 export async function getSessionToken(): Promise<string | null> {

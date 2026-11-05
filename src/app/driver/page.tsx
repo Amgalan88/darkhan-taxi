@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { tugrik } from "@/lib/format";
 import { supabasePublic } from "@/lib/supabase";
+import { AccountMenu } from "@/components/AccountMenu";
 
 const TaxiMap = dynamic(() => import("@/components/Map"), { ssr: false });
 
@@ -18,6 +19,7 @@ type Ride = {
 export default function DriverPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const [user, setUser] = useState<{ phone: string; name: string } | null>(null);
   const [open, setOpen] = useState<Ride[]>([]);
   const [active, setActive] = useState<Ride | null>(null);
   const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null);
@@ -42,9 +44,11 @@ export default function DriverPage() {
     fetch("/api/auth/me").then((r) => r.json()).then(async (d) => {
       if (!d.user) { router.replace("/login?next=/driver"); return; }
       if (d.user.role !== "driver" && d.user.role !== "admin") {
-        router.replace("/");
+        // Let them switch accounts instead of trapping on passenger home.
+        router.replace("/login?next=/driver");
         return;
       }
+      setUser(d.user);
       setReady(true);
       await loadOpen();
       await loadActive();
@@ -109,6 +113,9 @@ export default function DriverPage() {
 
   return (
     <div style={{ minHeight: "100dvh", position: "relative" }}>
+      <div style={{ position: "absolute", top: 12, right: 12, zIndex: 20 }}>
+        <AccountMenu phone={user?.phone} name={user?.name} />
+      </div>
       <TaxiMap
         pickup={active ? { lat: active.pickup_lat, lng: active.pickup_lng } : pos}
         dest={active ? { lat: active.dest_lat, lng: active.dest_lng } : null}

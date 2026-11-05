@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { tugrik } from "@/lib/format";
+import { AccountMenu } from "@/components/AccountMenu";
 
 type Trip = {
   id: string; status: string; price: number; distance_km: number;
@@ -17,6 +18,7 @@ type Driver = {
 
 export default function AdminPage() {
   const router = useRouter();
+  const [user, setUser] = useState<{ phone: string; name: string } | null>(null);
   const [tab, setTab] = useState<"trips" | "drivers" | "tariff">("trips");
   const [trips, setTrips] = useState<Trip[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -43,7 +45,8 @@ export default function AdminPage() {
   useEffect(() => {
     fetch("/api/auth/me").then((r) => r.json()).then((d) => {
       if (!d.user) { router.replace("/login?next=/admin"); return; }
-      if (d.user.role !== "admin") { router.replace("/"); return; }
+      if (d.user.role !== "admin") { router.replace("/login?next=/admin"); return; }
+      setUser(d.user);
       load();
     });
   }, [router]);
@@ -72,8 +75,9 @@ export default function AdminPage() {
 
   return (
     <div style={{ minHeight: "100dvh", background: "#F4F6F9" }}>
-      <div className="top">
+      <div className="top" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
         <div style={{ fontSize: 28, fontWeight: 800 }}>Админ · Дархан Такси</div>
+        <AccountMenu phone={user?.phone} name={user?.name} light />
       </div>
       <div style={{ display: "flex", gap: 8, padding: 16 }}>
         {([
