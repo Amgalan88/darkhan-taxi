@@ -322,7 +322,7 @@ export default function PassengerHome() {
   if (ride?.status === "requested") heading = "Жолооч хайж байна…";
   else if (ride?.status === "accepted") heading = `${etaMin} минутад ирнэ`;
   else if (ride?.status === "arrived") heading = "Аялалд явж байна";
-  else if (done && !settled) heading = "Төлбөр";
+  else if (done && !settled) heading = "Өмнөх аяллын төлбөр";
   else if (done && settled) heading = "Баярлалаа";
 
   const unpaid = Boolean(done && !settled);
@@ -349,8 +349,15 @@ export default function PassengerHome() {
         approach={approach}
         onPickDest={live || unpaid ? undefined : onPickDest}
       />
-      <div className="sheet" style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 10, maxHeight: callOpen ? (offerOpen ? "68vh" : "42vh") : "50vh", overflow: "auto" }}>
-        <div className="handle" />
+      <div
+        className="sheet"
+        style={{
+          position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 10, overflow: "auto",
+          maxHeight: callOpen ? (offerOpen ? "62vh" : "42vh") : "50vh",
+          padding: callOpen && !offerOpen ? "8px 20px calc(10px + env(safe-area-inset-bottom))" : undefined,
+        }}
+      >
+        <div className="handle" style={callOpen && !offerOpen ? { marginBottom: 8 } : undefined} />
         {!ready && <div style={{ fontWeight: 800, fontSize: 22 }}>Ачаалж байна…</div>}
         {ready && !callOpen && (
           <div style={{ fontSize: ride?.status === "accepted" ? 32 : 28, fontWeight: 800 }} aria-live="polite">
@@ -364,10 +371,12 @@ export default function PassengerHome() {
               <span style={{ width: 16, height: 16, borderRadius: "50%", background: "#FFC300", border: "3px solid #0B2545", flex: "none" }} />
               <span>{dest ? (destLabel || "Сонгосон цэг") : "Хаашаа явах вэ?"}</span>
             </div>
-            {quote && <div className="big" style={{ marginTop: 8 }}>{tugrik(chosenFare)}</div>}
             {quote && (
-              <div className="small" style={{ marginTop: 2 }}>
-                {Number(quote.distance_km).toFixed(1)} км · ~{quote.eta_min} мин
+              <div className="big" style={{ marginTop: 8, lineHeight: 1 }}>{tugrik(chosenFare)}</div>
+            )}
+            {quote && (
+              <div className="small" style={{ marginTop: 6, lineHeight: 1.2 }}>
+                {Number(quote.distance_km).toFixed(1)} км · ~{Math.max(1, Number(quote.eta_min) || 1)} мин
               </div>
             )}
             {quote && offerOpen && (
@@ -400,7 +409,7 @@ export default function PassengerHome() {
 
         {unpaid && (
           <>
-            <div className="small" style={{ marginTop: 8 }}>Эхлээд энэ төлбөрөө батална уу</div>
+            <div className="small" style={{ marginTop: 8 }}>Эхлээд төлбөрөө хийнэ үү</div>
             <div className="big" style={{ marginTop: 8 }}>{tugrik(fare)}</div>
             {(["qpay", "driver_cash"] as const).map((key) => {
               const on = payChoice === key;
@@ -442,10 +451,10 @@ export default function PassengerHome() {
 
         {!confirmCancel && callOpen && quote && (
           <>
-            <button type="button" className="btn cta" style={{ marginTop: 10 }} disabled={busy} onClick={() => { void callTaxi(); }}>
+            <button type="button" className="btn cta" style={{ marginTop: 8 }} disabled={busy} onClick={() => { void callTaxi(); }}>
               Дуудах
             </button>
-            <button type="button" className="quiet" onClick={() => setOfferOpen((v) => !v)}>
+            <button type="button" className="quiet" style={{ height: 56, marginTop: 0 }} onClick={() => setOfferOpen((v) => !v)}>
               {offerOpen ? "Үнэ хаах" : "Өөрөө үнэ"}
             </button>
           </>
