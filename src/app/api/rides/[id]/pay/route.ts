@@ -17,7 +17,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
     const token = await getSessionToken();
     if (!token) return NextResponse.json({ error: "Нэвтэрнэ үү" }, { status: 401 });
     await rpc("taxi_get_ride", { p_token: token, p_ride_id: id });
-    return NextResponse.json({ settlement: getSettlement(id) });
+    return NextResponse.json({ settlement: await getSettlement(id) });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }
@@ -33,8 +33,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     if (!method) return NextResponse.json({ error: "Төлбөрөө сонгоно уу" }, { status: 400 });
 
     const me = await rpc<Me>("taxi_me", { p_token: token });
-    if (me.role !== "passenger") {
-      return NextResponse.json({ error: "Зорчигч батална" }, { status: 403 });
+    const driverCash = method === "driver_cash" && (me.role === "driver" || me.role === "admin");
+    const passengerPay = me.role === "passenger";
+    if (!driverCash && !passengerPay) {
+      return NextResponse.json({ error: "Төлбөр батлах эрхгүй" }, { status: 403 });
     }
     const data = await rpc<{ ride: Ride & { driver_id?: string } }>("taxi_get_ride", {
       p_token: token,
@@ -48,7 +50,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const driverId = ride.driver_id || "";
     if (!driverId) return NextResponse.json({ error: "Жолооч олдсонгүй" }, { status: 400 });
 
-    const settlement = settleRide({
+    const settlement = await settleRide({
       rideId: ride.id,
       driverId,
       method,

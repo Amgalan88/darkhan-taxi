@@ -10,7 +10,7 @@ export async function GET() {
     if (!token) return NextResponse.json({ error: "Нэвтэрнэ үү" }, { status: 401 });
     const me = await rpc<Me>("taxi_me", { p_token: token });
     if (me.role !== "admin") return NextResponse.json({ error: "Зөвхөн админ" }, { status: 403 });
-    return NextResponse.json({ balances: listBalances() });
+    return NextResponse.json({ balances: await listBalances() });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }
@@ -25,7 +25,7 @@ export async function PUT(req: Request) {
     const body = await req.json().catch(() => ({}));
     const userId = String(body.user_id || "");
     if (!userId) return NextResponse.json({ error: "Жолооч олдсонгүй" }, { status: 400 });
-    const balance = setBalance(userId, Number(body.balance));
+    const balance = await setBalance(userId, Number(body.balance));
     return NextResponse.json({ userId, balance });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });

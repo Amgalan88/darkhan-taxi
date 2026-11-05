@@ -15,8 +15,8 @@ export async function GET() {
       return NextResponse.json({ error: "Жолоочийн хэтэвч" }, { status: 403 });
     }
     return NextResponse.json({
-      balance: getBalance(me.id),
-      commissionPct: getCommissionPct(),
+      balance: await getBalance(me.id),
+      commissionPct: await getCommissionPct(),
       userId: me.id,
     });
   } catch (e) {
@@ -33,7 +33,7 @@ export async function POST() {
     if (me.role !== "driver") {
       return NextResponse.json({ error: "Жолооч цэнэглэнэ" }, { status: 403 });
     }
-    const balance = addBalance(me.id, DEMO_TOPUP);
+    const balance = await addBalance(me.id, DEMO_TOPUP);
     const demo = !qpayConfigured();
     return NextResponse.json({
       balance,

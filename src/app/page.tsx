@@ -37,7 +37,6 @@ export default function PassengerHome() {
   const [offerOpen, setOfferOpen] = useState(false);
   const [payChoice, setPayChoice] = useState<"qpay" | "driver_cash" | null>(null);
   const [settled, setSettled] = useState(false);
-  const [stars, setStars] = useState(0);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [approachHint, setApproachHint] = useState<{ lat: number; lng: number } | null>(null);
   const quoteSeq = useRef(0);
@@ -64,7 +63,6 @@ export default function PassengerHome() {
     setOfferOpen(false);
     setPayChoice(null);
     setSettled(false);
-    setStars(0);
     setQpayNote("");
     setConfirmCancel(false);
     setErr("");
@@ -92,28 +90,30 @@ export default function PassengerHome() {
         window.clearTimeout(kill);
         const data = await res.json();
         if (stop) return;
-        if (data.ride && isLive(data.ride.status)) {
-          adopt(data.ride, data.driver);
+        const dueRes = await fetch("/api/rides/due", { signal: ctrl.signal });
+        const dueData = await dueRes.json();
+        if (stop) return;
+        if (dueData?.due) {
+          if (dueData.ride) adopt(dueData.ride, dueData.driver);
+          else {
+            setRide({
+              id: dueData.due.rideId,
+              status: "completed",
+              price: dueData.due.gross,
+              distance_km: 0,
+              pickup_lat: DARKHAN_CENTER.lat,
+              pickup_lng: DARKHAN_CENTER.lng,
+              pickup_label: "Таны байршил",
+              dest_lat: DARKHAN_CENTER.lat,
+              dest_lng: DARKHAN_CENTER.lng,
+              dest_label: "Өмнөх аялал",
+            });
+          }
+          setSettled(false);
           return;
         }
-        const saved = sessionStorage.getItem(RIDE_KEY);
-        if (!saved) return;
-        const gCtrl = new AbortController();
-        const gKill = window.setTimeout(() => gCtrl.abort(), 4000);
-        const g = await fetch(`/api/rides/${saved}`, { signal: gCtrl.signal });
-        window.clearTimeout(gKill);
-        const gd = await g.json();
-        if (stop) return;
-        const r = gd.ride as Ride | undefined;
-        const age = r?.updated_at ? Date.now() - new Date(r.updated_at).getTime() : Infinity;
-        if (r?.status === "completed" && age < 6 * 3600 * 1000) {
-          setRide(r);
-          setDriver(gd.driver || null);
-          setDest({ lat: r.dest_lat, lng: r.dest_lng });
-          setPickup({ lat: r.pickup_lat, lng: r.pickup_lng });
-          if (sessionStorage.getItem(`dt-settled-${r.id}`) === "1") setSettled(true);
-        } else {
-          sessionStorage.removeItem(RIDE_KEY);
+        if (data.ride && isLive(data.ride.status)) {
+          adopt(data.ride, data.driver);
         }
       } catch { /* home map still usable */ }
     }
@@ -141,15 +141,10 @@ export default function PassengerHome() {
     setPickup({ lat: Number(r.pickup_lat), lng: Number(r.pickup_lng) });
     setDest({ lat: Number(r.dest_lat), lng: Number(r.dest_lng) });
     setDestLabel(r.dest_label || "");
-    let donePay = false;
-    try {
-      sessionStorage.setItem(RIDE_KEY, r.id);
-      donePay = sessionStorage.getItem(`dt-settled-${r.id}`) === "1";
-    } catch { /* ignore */ }
-    setSettled(donePay);
+    try { sessionStorage.setItem(RIDE_KEY, r.id); } catch { /* ignore */ }
+    setSettled(false);
     setPayChoice(null);
     setConfirmCancel(false);
-    setStars(0);
   }
 
   useEffect(() => {
@@ -330,6 +325,8 @@ export default function PassengerHome() {
   else if (done && !settled) heading = "Төлбөр";
   else if (done && settled) heading = "Баярлалаа";
 
+  const unpaid = Boolean(done && !settled);
+  const callOpen = ready && !ride && !unpaid;
   const approach = ride?.status === "accepted" && approachHint
     ? { id: ride.id, to: { lat: Number(ride.pickup_lat), lng: Number(ride.pickup_lng) }, hint: approachHint }
     : null;
@@ -350,33 +347,33 @@ export default function PassengerHome() {
         driver={ride?.status === "arrived" ? { lat: Number(ride.pickup_lat), lng: Number(ride.pickup_lng) } : null}
         demoOrigin={ride && ride.status !== "requested" ? null : pickup}
         approach={approach}
-        onPickDest={live || done ? undefined : onPickDest}
+        onPickDest={live || unpaid ? undefined : onPickDest}
       />
-      <div className="sheet" style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 10, maxHeight: "58vh", overflow: "auto" }}>
+      <div className="sheet" style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 10, maxHeight: callOpen ? (offerOpen ? "68vh" : "42vh") : "50vh", overflow: "auto" }}>
         <div className="handle" />
-        {!ready && <div style={{ fontWeight: 800, fontSize: 28 }}>Ачаалж байна…</div>}
-        {ready && (
+        {!ready && <div style={{ fontWeight: 800, fontSize: 22 }}>Ачаалж байна…</div>}
+        {ready && !callOpen && (
           <div style={{ fontSize: ride?.status === "accepted" ? 32 : 28, fontWeight: 800 }} aria-live="polite">
             {heading}
           </div>
         )}
 
-        {ready && !ride && (
+        {callOpen && (
           <>
-            <div className="field" style={{ marginTop: 12, minHeight: 64 }}>
+            <div className="field" style={{ marginTop: 4, minHeight: 64 }}>
               <span style={{ width: 16, height: 16, borderRadius: "50%", background: "#FFC300", border: "3px solid #0B2545", flex: "none" }} />
-              <span>{dest ? (destLabel || "Сонгосон цэг") : "Газрын зураг дээр дарна уу"}</span>
+              <span>{dest ? (destLabel || "Сонгосон цэг") : "Хаашаа явах вэ?"}</span>
             </div>
-            {quote && <div className="big" style={{ marginTop: 12 }}>{tugrik(chosenFare)}</div>}
+            {quote && <div className="big" style={{ marginTop: 8 }}>{tugrik(chosenFare)}</div>}
             {quote && (
-              <button type="button" className="quiet" onClick={() => setOfferOpen((v) => !v)}>
-                {offerOpen ? "Нуух" : "Өөрөө үнэ санал болгох"}
-              </button>
+              <div className="small" style={{ marginTop: 2 }}>
+                {Number(quote.distance_km).toFixed(1)} км · ~{quote.eta_min} мин
+              </div>
             )}
             {quote && offerOpen && (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
                 <button type="button" className="step" aria-label="Үнэ хасах" onClick={() => setOffer((o) => Math.max(500, (o ?? quote.price) - 500))}>−</button>
-                <div style={{ fontSize: 28, fontWeight: 800 }}>{tugrik(chosenFare)}</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>Өөрөө үнэ</div>
                 <button type="button" className="step" aria-label="Үнэ нэмэх" onClick={() => setOffer((o) => (o ?? quote.price) + 500)}>+</button>
               </div>
             )}
@@ -401,9 +398,9 @@ export default function PassengerHome() {
           <div style={{ marginTop: 12, fontWeight: 800, fontSize: 20 }}>Очих газар · {ride.dest_label || "Сонгосон цэг"}</div>
         )}
 
-        {done && !settled && (
+        {unpaid && (
           <>
-            <div className="small" style={{ marginTop: 8 }}>{ride?.dest_label || "Аялал"}</div>
+            <div className="small" style={{ marginTop: 8 }}>Эхлээд энэ төлбөрөө батална уу</div>
             <div className="big" style={{ marginTop: 8 }}>{tugrik(fare)}</div>
             {(["qpay", "driver_cash"] as const).map((key) => {
               const on = payChoice === key;
@@ -413,7 +410,7 @@ export default function PassengerHome() {
                   type="button"
                   onClick={() => setPayChoice(key)}
                   style={{
-                    width: "100%", height: 80, marginTop: 12, borderRadius: 16,
+                    width: "100%", height: 64, marginTop: 8, borderRadius: 16,
                     border: on ? "3px solid #0B2545" : "2px solid #D5DBE3",
                     background: on ? "#FFC300" : "#fff",
                     color: "#0B2545", fontWeight: 800, fontSize: 22,
@@ -427,25 +424,7 @@ export default function PassengerHome() {
         )}
 
         {done && settled && (
-          <>
-            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-              {[1, 2, 3, 4, 5].map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  aria-label={`${n} од`}
-                  onClick={() => setStars(n)}
-                  style={{
-                    flex: 1, height: 56, borderRadius: 14, border: "2px solid #0B2545",
-                    background: n <= stars ? "#FFC300" : "#fff", fontWeight: 800, fontSize: 22, color: "#0B2545",
-                  }}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-            {qpayNote && <div className="small" style={{ marginTop: 10 }}>{qpayNote}</div>}
-          </>
+          <div className="small" style={{ marginTop: 8 }}>{qpayNote || "Баярлалаа"}</div>
         )}
 
         {note && <div style={{ marginTop: 8, fontWeight: 700 }}>{note}</div>}
@@ -461,17 +440,22 @@ export default function PassengerHome() {
           </>
         )}
 
-        {!confirmCancel && ready && !ride && quote && (
-          <button type="button" className="btn cta" style={{ marginTop: 14 }} disabled={busy} onClick={() => { void callTaxi(); }}>
-            Дуудах
-          </button>
+        {!confirmCancel && callOpen && quote && (
+          <>
+            <button type="button" className="btn cta" style={{ marginTop: 10 }} disabled={busy} onClick={() => { void callTaxi(); }}>
+              Дуудах
+            </button>
+            <button type="button" className="quiet" onClick={() => setOfferOpen((v) => !v)}>
+              {offerOpen ? "Үнэ хаах" : "Өөрөө үнэ"}
+            </button>
+          </>
         )}
 
         {!confirmCancel && showDriver && phone && (
           <a className="btn green" style={{ marginTop: 14, textDecoration: "none" }} href={`tel:+976${phone}`}>Залгах</a>
         )}
 
-        {!confirmCancel && done && !settled && (
+        {!confirmCancel && unpaid && (
           <button type="button" className="btn cta" style={{ marginTop: 14 }} disabled={busy || !payChoice} onClick={() => { void confirmPay(); }}>
             Батлах
           </button>

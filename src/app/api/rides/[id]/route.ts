@@ -3,7 +3,8 @@ import { getSessionToken } from '@/lib/session';
 import { rpc } from '@/lib/rpc';
 import { plateError } from '@/lib/plate';
 import type { Me, Ride } from '@/lib/ride';
-import { getBalance } from '@/lib/ledger';
+import { fareOf } from '@/lib/ride';
+import { getBalance, markDue } from '@/lib/ledger';
 
 const FNS: Record<string, string> = {
   accept: 'taxi_accept_ride',
@@ -53,7 +54,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       if (me?.role === 'driver' && me.driver && me.driver.approved === false) {
         return NextResponse.json({ error: 'Админ зөвшөөрөөгүй байна' }, { status: 400 });
       }
-      if (me?.role === 'driver' && getBalance(me.id) <= 0) {
+      if (me?.role === 'driver' && (await getBalance(me.id)) <= 0) {
         return NextResponse.json({ error: 'Кредит цэнэглэнэ үү' }, { status: 400 });
       }
     }
@@ -77,7 +78,13 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       }
     }
 
-    const ride = await rpc(fn, { p_token: token, p_ride_id: id });
+    const ride = await rpc<Ride>(fn, { p_token: token, p_ride_id: id });
+    if (action === 'finish' || action === 'complete' || action === 'cash') {
+      if (ride?.id && ride.passenger_id) {
+        await markDue({ passengerId: ride.passenger_id, rideId: ride.id, gross: fareOf(ride) });
+      }
+      return NextResponse.json({ ride, payment_pending: true });
+    }
     return NextResponse.json({ ride });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
