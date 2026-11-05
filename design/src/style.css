@@ -1,0 +1,24 @@
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--navy:#0B2545;--yellow:#FFC300;--white:#FFFFFF;--bg:#F4F6F9;--muted:#4A5568;--green:#16733A;--red:#B42318;--line:#D5DBE3}
+html,body{width:390px;height:844px;overflow:hidden;font-family:Inter,'Noto Sans',sans-serif;color:var(--navy);background:var(--bg);font-size:18px;line-height:1.4}
+.screen{position:relative;width:390px;height:844px;overflow:hidden}
+.status{height:44px;display:flex;justify-content:space-between;align-items:center;padding:0 24px;font-size:16px;font-weight:600}
+.map{position:absolute;inset:0;background:#E8ECE4}
+.map svg{width:100%;height:100%}
+.maptag{position:absolute;left:16px;bottom:8px;font-size:12px;color:#4A5568;background:#ffffffcc;padding:2px 6px;border-radius:6px}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:28px 28px 0 0;padding:20px 20px 28px;box-shadow:0 -6px 24px rgba(11,37,69,.18)}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;border:none;border-radius:18px;font-family:inherit;font-weight:800}
+.cta{height:72px;background:var(--yellow);color:var(--navy);font-size:26px}
+.sec{height:60px;background:#fff;color:var(--navy);border:2px solid var(--navy);font-size:20px;margin-top:12px}
+.green{height:72px;background:var(--green);color:#fff;font-size:26px}
+.field{min-height:64px;border:2px solid var(--line);border-radius:16px;display:flex;align-items:center;gap:14px;padding:0 16px;font-size:20px;font-weight:600;background:#fff}
+.label{font-size:16px;color:var(--muted);font-weight:600;margin-bottom:6px}
+.dot{width:16px;height:16px;border-radius:50%;flex:none}
+.card{border-radius:18px;background:var(--bg);padding:16px}
+.big{font-size:40px;font-weight:800}
+.small{font-size:18px;color:var(--muted)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.step{width:56px;height:56px;border-radius:14px;border:2px solid var(--navy);background:#fff;font-size:30px;font-weight:800;color:var(--navy);display:flex;align-items:center;justify-content:center}
+.top{background:var(--navy);color:#fff;padding:0 24px 28px}
+.top .status{padding:0;color:#fff}
+.example{position:absolute;top:52px;right:16px;background:var(--navy);color:#fff;font-size:13px;padding:4px 10px;border-radius:10px}
